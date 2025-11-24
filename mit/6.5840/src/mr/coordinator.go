@@ -114,7 +114,7 @@ func (c *Coordinator) Done() bool {
 }
 
 // RPC handlers for the worker to call
-func (c *Coordinator) GetTask(args *ExampleArgs, reply *GetTaskReply) error {
+func (c *Coordinator) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 	if !c.mapContoller.IsCompleted() {
 		id := c.mapContoller.GetPendingTask()
 		if id != -1 {
