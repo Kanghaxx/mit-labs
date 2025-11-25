@@ -1,7 +1,6 @@
 package mr
 
 import (
-	"container/list"
 	"fmt"
 	"log"
 	"net"
@@ -9,7 +8,7 @@ import (
 	"net/rpc"
 	"os"
 	"path/filepath"
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -35,15 +34,14 @@ type Coordinator struct {
 
 type PhaseController struct {
 	pendingTasksChannel   chan int
-	activeTasksChannel    chan int
 	completedTasksChannel chan int
-	phazeCompleted        chan bool
+	expiredTasksChannel   chan int
+	phaseCompleted        chan bool
 	totalTasks            int
 	timeout               time.Duration
-	activeQueue           *list.List
 	completedTasks        map[int]bool
-	completedTasksCount   int
-	completedMu           sync.Mutex
+	activeTasks           map[int]bool
+	completedTasksCount   int32
 }
 
 // create a Coordinator.
@@ -61,7 +59,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		id++
 	}
 	var pendingMapTasks = make(chan int, len(files))
-	for id, _ := range filesMap {
+	for id := range filesMap {
 		pendingMapTasks <- id
 	}
 
@@ -71,25 +69,23 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	var d = &PhaseController{
 		totalTasks:            len(files),
 		timeout:               timeout,
-		activeQueue:           list.New(),
 		completedTasks:        make(map[int]bool),
+		activeTasks:           make(map[int]bool),
 		pendingTasksChannel:   pendingMapTasks,
-		activeTasksChannel:    make(chan int, len(files)),
 		completedTasksChannel: make(chan int, len(files)),
-		phazeCompleted:        make(chan bool, len(files)),
-		completedMu:           sync.Mutex{},
+		expiredTasksChannel:   make(chan int, len(files)),
+		phaseCompleted:        make(chan bool, len(files)),
 	}
 
 	var r = &PhaseController{
 		totalTasks:            nReduce,
 		timeout:               timeout,
-		activeQueue:           list.New(),
 		completedTasks:        make(map[int]bool),
+		activeTasks:           make(map[int]bool),
 		pendingTasksChannel:   make(chan int, nReduce),
-		activeTasksChannel:    make(chan int, nReduce),
 		completedTasksChannel: make(chan int, nReduce),
-		phazeCompleted:        make(chan bool, nReduce),
-		completedMu:           sync.Mutex{},
+		expiredTasksChannel:   make(chan int, nReduce),
+		phaseCompleted:        make(chan bool, nReduce),
 	}
 
 	c := Coordinator{
@@ -145,7 +141,6 @@ func (c *Coordinator) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 
 func (c *Coordinator) GetMapTask(args *GetTaskArgs, reply *GetMapTaskReply) error {
 	if entry, ok := c.filesMap[args.Id]; ok {
-		//reply.Filename = entry.Filepath
 		reply.Filename = entry.Filename
 		reply.NReduce = c.nReduce
 	}
@@ -155,13 +150,8 @@ func (c *Coordinator) GetMapTask(args *GetTaskArgs, reply *GetMapTaskReply) erro
 
 func (c *Coordinator) GetReduceTask(args *GetTaskArgs, reply *GetReduceTaskReply) error {
 	if entry, ok := c.filesMap[args.Id]; ok {
-		//reply.Filename = entry.Filepath
 		reply.Filename = entry.Filename
-	} else {
-		reply.Filename = ""
 	}
-	// Always provide the number of reduce tasks
-	reply.NReduce = c.nReduce
 	//fmt.Printf("GetMapTask Request received. Filename=%v nReduce=%v\n", reply.Filename, reply.NReduce)
 	return nil
 }
@@ -198,9 +188,7 @@ func (c *PhaseController) GetPendingTask() int {
 }
 
 func (c *PhaseController) IsCompleted() bool {
-	c.completedMu.Lock()
-	defer c.completedMu.Unlock()
-	return c.completedTasksCount == c.totalTasks
+	return int(atomic.LoadInt32(&c.completedTasksCount)) == c.totalTasks
 }
 
 func (c *PhaseController) TaskCompleted(id int) {
@@ -208,73 +196,48 @@ func (c *PhaseController) TaskCompleted(id int) {
 }
 
 func (c *PhaseController) taskStarted(id int) {
-	c.activeTasksChannel <- id
+	go func() {
+		time.Sleep(c.timeout)
+		c.expiredTasksChannel <- id
+	}()
 }
 
 func (c *PhaseController) Start() {
 	go func() {
 		for {
-			for notMore := false; !notMore; {
-				select {
-				case id := <-c.activeTasksChannel:
-					c.activeQueue.PushBack(TaskState{Id: id, StartedAt: time.Now().UTC()})
-				default:
-					notMore = true
-				}
-			}
-
-			for notMore := false; !notMore; {
-				select {
-				case id := <-c.completedTasksChannel:
-					_, ok := c.completedTasks[id]
-					if !ok {
-						c.completedMu.Lock()
-						c.completedTasksCount++
-						c.completedMu.Unlock()
-						if Debug {
-							fmt.Printf("Task completed. Id=%v CompletedCount=%v \n", id, c.completedTasksCount)
-						}
+			select {
+			case id := <-c.completedTasksChannel:
+				_, ok := c.completedTasks[id]
+				if !ok {
+					newCount := atomic.AddInt32(&c.completedTasksCount, 1)
+					if Debug {
+						fmt.Printf("Task completed. Id=%v CompletedCount=%v \n", id, newCount)
 					}
-					c.completedTasks[id] = true
-				default:
-					notMore = true
+				} else {
+					continue // zombie completion
+				}
+				c.completedTasks[id] = true
+
+				if c.IsCompleted() {
+					c.phaseCompleted <- true
+					fmt.Printf("Stage completed. Total completed tasks=%v\n", c.completedTasksCount)
+					return
+				}
+			case id := <-c.expiredTasksChannel:
+				_, completed := c.completedTasks[id]
+				if completed {
+					continue // already completed, no need to reissue
+				} else {
+					c.pendingTasksChannel <- id
 				}
 			}
-
-			if c.IsCompleted() {
-				c.phazeCompleted <- true
-				fmt.Printf("Stage completed. Total completed tasks=%v\n", c.completedTasksCount)
-				return
-			}
-
-			for {
-				oldest := c.activeQueue.Front()
-				if oldest == nil {
-					break
-				}
-				oldestTask := oldest.Value.(TaskState)
-				_, ok := c.completedTasks[oldestTask.Id]
-				if ok {
-					c.activeQueue.Remove(oldest)
-					continue
-				}
-				elapsed := time.Now().UTC().Sub(oldestTask.StartedAt)
-				if elapsed <= c.timeout {
-					break
-				}
-				fmt.Printf("Re-queueing stuck task Id=%v startedAt=%v \n", oldestTask.Id, oldestTask.StartedAt)
-				c.pendingTasksChannel <- oldestTask.Id
-				c.activeQueue.Remove(oldest)
-			}
-
-			time.Sleep(time.Millisecond * 200)
 		}
 	}()
 }
 
 func (c *Coordinator) handleMapPhazeCompletion() {
 	go func() {
-		<-c.mapContoller.phazeCompleted
+		<-c.mapContoller.phaseCompleted
 		if Debug {
 			fmt.Printf("Coordinator: Initializing Reduce stage...\n")
 		}

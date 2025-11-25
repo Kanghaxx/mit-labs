@@ -48,9 +48,9 @@ func Worker(mapf func(string, string) []KeyValue,
 			if Debug {
 				fmt.Printf("Starting Reduce Task %v\n", id)
 			}
-			var filename, nReduce = GetReduceTask(id)
+			var filename = GetReduceTask(id)
 			if Debug {
-				fmt.Printf("Reduce Task %v assigned file %v. nReduce=%v\n", id, filename, nReduce)
+				fmt.Printf("Reduce Task %v assigned file %v", id, filename)
 			}
 			executeReduce(id, filename, reducef)
 			CompleteReduceTask(id)
@@ -262,7 +262,7 @@ func GetMapTask(id int) (string, int) {
 	}
 }
 
-func GetReduceTask(id int) (string, int) {
+func GetReduceTask(id int) string {
 	args := GetTaskArgs{}
 	args.Id = id
 
@@ -270,10 +270,10 @@ func GetReduceTask(id int) (string, int) {
 
 	ok := call("Coordinator.GetReduceTask", &args, &reply)
 	if ok {
-		return reply.Filename, reply.NReduce
+		return reply.Filename
 	} else {
 		fmt.Printf("call failed!\n")
-		return "", 0
+		return ""
 	}
 }
 

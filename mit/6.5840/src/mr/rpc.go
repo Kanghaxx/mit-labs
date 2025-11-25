@@ -36,7 +36,6 @@ type GetMapTaskReply struct {
 
 type GetReduceTaskReply struct {
 	Filename string
-	NReduce  int
 }
 
 type CompleteTaskArgs struct {
