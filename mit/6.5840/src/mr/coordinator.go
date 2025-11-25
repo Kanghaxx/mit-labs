@@ -116,9 +116,7 @@ func (c *Coordinator) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 		if id != -1 {
 			reply.TaskType = MapTask
 			reply.Id = id
-			if Debug {
-				fmt.Printf("GetTask Request received. Returning Map Task Id=%v\n", reply.Id)
-			}
+			DebugLog("GetTask Request received. Returning Map Task Id=%v\n", reply.Id)
 			return nil
 		}
 	} else {
@@ -126,16 +124,13 @@ func (c *Coordinator) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 		if id != -1 {
 			reply.TaskType = ReduceTask
 			reply.Id = id
-			if Debug {
-				fmt.Printf("GetTask Request received. Returning Reduce Task Id=%v\n", reply.Id)
-			}
+			DebugLog("GetTask Request received. Returning Reduce Task Id=%v\n", reply.Id)
 			return nil
 		}
 	}
 	reply.TaskType = NoneTask
-	if Debug {
-		fmt.Printf("GetTask Request received. No tasks available.\n")
-	}
+	DebugLog("GetTask Request received. No tasks available.\n")
+
 	return nil
 }
 
@@ -144,7 +139,7 @@ func (c *Coordinator) GetMapTask(args *GetTaskArgs, reply *GetMapTaskReply) erro
 		reply.Filename = entry.Filename
 		reply.NReduce = c.nReduce
 	}
-	//fmt.Printf("GetMapTask Request received. Filename=%v nReduce=%v\n", reply.Filename, reply.NReduce)
+	DebugLog("GetMapTask Request received. Filename=%v nReduce=%v\n", reply.Filename, reply.NReduce)
 	return nil
 }
 
@@ -152,21 +147,21 @@ func (c *Coordinator) GetReduceTask(args *GetTaskArgs, reply *GetReduceTaskReply
 	if entry, ok := c.filesMap[args.Id]; ok {
 		reply.Filename = entry.Filename
 	}
-	//fmt.Printf("GetMapTask Request received. Filename=%v nReduce=%v\n", reply.Filename, reply.NReduce)
+	DebugLog("GetMapTask Request received. Filename=%v\n", reply.Filename)
 	return nil
 }
 
 func (c *Coordinator) CompleteMapTask(args *CompleteTaskArgs, reply *CompleteTaskReply) error {
 	c.mapContoller.TaskCompleted(args.Id)
 	reply.Ok = true
-	//fmt.Printf("CompleteMapTask Request received. Id=%v\n", args.Id)
+	DebugLog("CompleteMapTask Request received. Id=%v\n", args.Id)
 	return nil
 }
 
 func (c *Coordinator) CompleteReduceTask(args *CompleteTaskArgs, reply *CompleteTaskReply) error {
 	c.reduceController.TaskCompleted(args.Id)
 	reply.Ok = true
-	//fmt.Printf("CompleteMapTask Request received. Id=%v\n", args.Id)
+	DebugLog("CompleteMapTask Request received. Id=%v\n", args.Id)
 	return nil
 }
 
@@ -210,9 +205,7 @@ func (c *PhaseController) Start() {
 				_, ok := c.completedTasks[id]
 				if !ok {
 					newCount := atomic.AddInt32(&c.completedTasksCount, 1)
-					if Debug {
-						fmt.Printf("Task completed. Id=%v CompletedCount=%v \n", id, newCount)
-					}
+					DebugLog("Task completed. Id=%v CompletedCount=%v \n", id, newCount)
 				} else {
 					continue // zombie completion
 				}
@@ -229,6 +222,7 @@ func (c *PhaseController) Start() {
 					continue // already completed, no need to reissue
 				} else {
 					c.pendingTasksChannel <- id
+					fmt.Printf("Re-queueing stuck task Id=%v\n", id)
 				}
 			}
 		}
@@ -238,16 +232,19 @@ func (c *PhaseController) Start() {
 func (c *Coordinator) handleMapPhazeCompletion() {
 	go func() {
 		<-c.mapContoller.phaseCompleted
-		if Debug {
-			fmt.Printf("Coordinator: Initializing Reduce stage...\n")
-		}
+		DebugLog("Coordinator: Initializing Reduce stage...\n")
+
 		for id := 0; id < c.nReduce; id++ {
 			c.reduceController.AddTask(id)
 		}
-		if Debug {
-			fmt.Printf("Coordinator: Reduce stage initialized\n")
-		}
+		DebugLog("Coordinator: Reduce stage initialized\n")
 	}()
+}
+
+func DebugLog(format string, a ...interface{}) {
+	if Debug {
+		log.Printf(format, a...)
+	}
 }
 
 // start a thread that listens for RPCs from worker.go

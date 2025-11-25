@@ -32,35 +32,27 @@ func Worker(mapf func(string, string) []KeyValue,
 		}
 		switch taskType {
 		case MapTask:
-			if Debug {
-				fmt.Printf("Starting Map Task %v\n", id)
-			}
+			DebugLog("Starting Map Task %v\n", id)
 			var filename, nReduce = GetMapTask(id)
+			DebugLog("Map Task %v assigned file %v. nReduce=%v\n", id, filename, nReduce)
+
 			executeMap(id, filename, nReduce, mapf)
-			if Debug {
-				fmt.Printf("Map Task %v assigned file %v. nReduce=%v\n", id, filename, nReduce)
-			}
+
 			CompleteMapTask(id)
-			if Debug {
-				fmt.Printf("Map Task completed. id=%v\n", id)
-			}
+			DebugLog("Map Task completed. id=%v\n", id)
+
 		case ReduceTask:
-			if Debug {
-				fmt.Printf("Starting Reduce Task %v\n", id)
-			}
+			DebugLog("Starting Reduce Task %v\n", id)
 			var filename = GetReduceTask(id)
-			if Debug {
-				fmt.Printf("Reduce Task %v assigned file %v", id, filename)
-			}
+			DebugLog("Reduce Task %v assigned file %v", id, filename)
+
 			executeReduce(id, filename, reducef)
+
 			CompleteReduceTask(id)
-			if Debug {
-				fmt.Printf("Reduce Task completed. id=%v\n", id)
-			}
+			DebugLog("Reduce Task completed. id=%v\n", id)
+
 		case NoneTask:
-			if Debug {
-				fmt.Printf("No Task assigned.\n")
-			}
+			DebugLog("No Task assigned.\n")
 		}
 		time.Sleep(1 * time.Second)
 	}
