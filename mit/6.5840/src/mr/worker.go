@@ -234,8 +234,7 @@ func saveToIntermediateFiles(buckets [][]KeyValue, nReduce int, id int) {
 }
 
 func GetTask() (int, TaskType, bool) {
-	args := ExampleArgs{}
-	args.X = 99
+	args := GetTaskArgs{}
 
 	reply := GetTaskReply{}
 
