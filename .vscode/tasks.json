@@ -1,0 +1,36 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "echo",
+            "type": "shell",
+            "command": "echo Hello"
+        },
+        {
+            "label": "build-wc-plugin",
+            "type": "shell",
+            "command": "go build -buildmode=plugin -o wc.so wc.go",
+            "options": {
+                "cwd": "${workspaceFolder}/mit/6.5840/src/mrapps"
+            }
+        },
+        {
+            "label": "build-mrworker",
+            "type": "shell",
+            "command": "go build -o mrworker mrworker.go",
+            "options": {
+                "cwd": "${workspaceFolder}/mit/6.5840/src/main"
+            }
+        },
+        {
+            "label": "build-all",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/mit/6.5840/src/mrapps && go build -buildmode=plugin -o wc.so wc.go && cd ${workspaceFolder}/mit/6.5840/src/main && go build -o mrworker mrworker.go",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
+        }
+    ]
+}
