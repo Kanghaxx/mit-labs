@@ -1,8 +1,32 @@
 { 
 	"version": "0.2.0",
-	"configurations": [        
+	"configurations": [         
 		{
-			"name": "Run Coordinator",
+			"name": "KV Run Test Lock",
+			"type": "go",
+			"request": "launch",
+			"mode": "test",
+			"program": "${workspaceFolder}/mit/6.5840/src/kvsrv1/lock/",
+			"args": [
+				"-test.v",
+			],
+			"cwd": "${workspaceFolder}/mit/6.5840/src/kvsrv1/lock/",
+			"buildFlags": "-race" 
+		},           
+		{
+			"name": "KV Run Test",
+			"type": "go",
+			"request": "launch",
+			"mode": "test",
+			"program": "${workspaceFolder}/mit/6.5840/src/kvsrv1",
+			"args": [
+				"-test.v"
+			],
+			"cwd": "${workspaceFolder}/mit/6.5840/src/kvsrv1",
+			"buildFlags": "-race" 
+		},   
+		{
+			"name": "MR Run Coordinator",
 			"type": "go",
 			"request": "launch",
 			"mode": "auto",
@@ -20,14 +44,14 @@
 			"cwd": "${workspaceFolder}/mit/6.5840/src/main"
 		},
 		{
-			"name": "Build and Run mrworker",
+			"name": "MR Run Worker",
 			"type": "go",
 			"request": "launch",
 			"mode": "exec",
 			"program": "${workspaceFolder}/mit/6.5840/src/main/mrworker",
 			"args": ["${workspaceFolder}/mit/6.5840/src/mrapps/wc.so"],
 			"cwd": "${workspaceFolder}/mit/6.5840/src/main",
-			"preLaunchTask": "build-all"
+			"preLaunchTask": "mr-build-all"
 		}
 	],
 	"compounds": []

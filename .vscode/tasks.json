@@ -25,7 +25,7 @@
             }
         },
         {
-            "label": "build-all",
+            "label": "mr-build-all",
             "type": "shell",
             "command": "cd ${workspaceFolder}/mit/6.5840/src/mrapps && go build -buildmode=plugin -o wc.so wc.go && cd ${workspaceFolder}/mit/6.5840/src/main && go build -o mrworker mrworker.go",
             "options": {
