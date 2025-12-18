@@ -1,2 +1,4 @@
-# mit-map-reduce
-MIT map reduce lab
+# MIT labs
+
+* Lab 1: Distributed Map\Reduce
+* Lab 2: Key\Value Server
