@@ -8,6 +8,7 @@ package raft
 
 import (
 	//	"bytes"
+	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -16,9 +17,20 @@ import (
 	//	"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/raftapi"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
+type PeerState int32
+
+const (
+	Follower PeerState = iota
+	Candidate
+	Leader
+)
+
+const (
+	votedForNone = -1
+)
 
 // A Go object implementing a single Raft peer.
 type Raft struct {
@@ -31,91 +43,283 @@ type Raft struct {
 	// Your data here (3A, 3B, 3C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-
+	peerState   PeerState
+	currentTerm int
+	//termMu                  sync.Mutex
+	votedFor                int
+	electionTimeoutMs       int64
+	majority                int
+	lastHeartbeatReceivedAt time.Time
+	heartbeatMu             sync.Mutex
 }
 
-// return currentTerm and whether this server
-// believes it is the leader.
-func (rf *Raft) GetState() (int, bool) {
+// the service or tester wants to create a Raft server. the ports
+// of all the Raft servers (including this one) are in peers[]. this
+// server's port is peers[me]. all the servers' peers[] arrays
+// have the same order. persister is a place for this server to
+// save its persistent state, and also initially holds the most
+// recent saved state, if any. applyCh is a channel on which the
+// tester or service expects Raft to send ApplyMsg messages.
+// Make() must return quickly, so it should start goroutines
+// for any long-running work.
+func Make(peers []*labrpc.ClientEnd, me int,
+	persister *tester.Persister, applyCh chan raftapi.ApplyMsg) raftapi.Raft {
+	rf := &Raft{}
+	rf.peers = peers
+	rf.persister = persister
+	rf.me = me
 
-	var term int
-	var isleader bool
-	// Your code here (3A).
-	return term, isleader
+	// Your initialization code here (3A, 3B, 3C).
+	rf.peerState = Follower
+	rf.votedFor = votedForNone
+	rf.currentTerm = 0
+	rf.majority = len(rf.peers)/2 + 1
+	rf.resetElectionTimeout()
+	rf.resetHeartbeatTimout()
+
+	// initialize from state persisted before a crash
+	rf.readPersist(persister.ReadRaftState())
+
+	// start ticker goroutine to start elections
+	go rf.checkElection()
+	// start heartbits
+	go rf.startHeartbits()
+
+	DPrintf("raft instance %d started", rf.me)
+
+	return rf
 }
 
-// save Raft's persistent state to stable storage,
-// where it can later be retrieved after a crash and restart.
-// see paper's Figure 2 for a description of what should be persistent.
-// before you've implemented snapshots, you should pass nil as the
-// second argument to persister.Save().
-// after you've implemented snapshots, pass the current snapshot
-// (or nil if there's not yet a snapshot).
-func (rf *Raft) persist() {
-	// Your code here (3C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
-}
-
-
-// restore previously persisted state.
-func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
-		return
+func (rf *Raft) startHeartbits() {
+	for rf.killed() == false {
+		//rf.mu.Lock()
+		//peerState := rf.peerState
+		//rf.mu.Unlock()
+		peerState := PeerState(atomic.LoadInt32((*int32)(&rf.peerState)))
+		if peerState == Leader {
+			// send heartbits
+			// TODO send in parallel
+			// mb each peer has a goroutine and each gorutine has a sync cycle in it. to avoid 1 slow peer to slow down all other
+			for i := range rf.peers {
+				if i == rf.me {
+					continue
+				}
+				args := &AppendEntriesArgs{
+					Term:     rf.currentTerm,
+					LeaderId: rf.me,
+				}
+				reply := &AppendEntriesReply{}
+				ok := rf.sendAppendEntries(i, args, reply)
+				DPrintf("raft instance %d sent heartbit to instance %d", rf.me, i)
+				if ok {
+					rf.mu.Lock()
+					if reply.Term > rf.currentTerm {
+						DPrintf("Raft instance %d detected higher term %d on heartbeat response from %d. Converting to follower", rf.me, i, reply.Term)
+						rf.currentTerm = reply.Term
+						rf.votedFor = votedForNone
+						rf.transitionPeerState(Follower)
+					}
+					rf.mu.Unlock()
+				}
+			}
+		}
+		time.Sleep(time.Duration(150) * time.Millisecond)
 	}
-	// Your code here (3C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
-}
-
-// how many bytes in Raft's persisted log?
-func (rf *Raft) PersistBytes() int {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	return rf.persister.RaftStateSize()
-}
-
-
-// the service says it has created a snapshot that has
-// all info up to and including index. this means the
-// service no longer needs the log through (and including)
-// that index. Raft should now trim its log as much as possible.
-func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (3D).
 
 }
 
+func (rf *Raft) checkElection() {
+	for rf.killed() == false {
 
-// example RequestVote RPC arguments structure.
-// field names must start with capital letters!
-type RequestVoteArgs struct {
-	// Your data here (3A, 3B).
+		// Your code here (3A)
+		// Check if a leader election should be started.
+		rf.mu.Lock()
+		peerState := rf.peerState
+		rf.mu.Unlock()
+		if (peerState != Leader) && (rf.electionTimeoutElapsed()) {
+			// Start election
+			DPrintf("Raft instance %d election timeout elapsed, starting election", rf.me)
+
+			rf.mu.Lock()
+			rf.transitionPeerState(Candidate)
+			rf.resetElectionTimeout()
+			rf.currentTerm++
+			rf.votedFor = rf.me
+			rf.mu.Unlock()
+
+			success, votes := rf.collectQuorumVotes()
+			if success {
+				DPrintf("Raft instance %d received majority votes (%d), becoming leader", rf.me, votes)
+				rf.mu.Lock()
+				if rf.peerState == Candidate { // could have been changed to Follower by RPCs
+					rf.transitionPeerState(Leader)
+					DPrintf("Raft instance %d current state %d", rf.me, rf.peerState)
+				}
+				rf.mu.Unlock()
+			} else {
+				DPrintf("Raft instance %d received only %d votes, staying as candidate", rf.me, votes)
+			}
+		}
+
+		// pause for a random amount of time between 50 and 350
+		// milliseconds.
+		ms := 50 + (rand.Int63() % 300)
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+	}
 }
 
-// example RequestVote RPC reply structure.
-// field names must start with capital letters!
-type RequestVoteReply struct {
-	// Your data here (3A).
+func (rf *Raft) collectQuorumVotes() (bool, int) {
+
+	args := &RequestVoteArgs{
+		Term:        rf.currentTerm,
+		CandidateId: rf.me,
+		// 3B
+	}
+	resultCh := make(chan struct {
+		ok    bool
+		id    int
+		reply *RequestVoteReply
+	})
+	for i := range rf.peers {
+		if i == rf.me {
+			continue
+		}
+		go func() {
+			DPrintf("Raft instance %d requests vote from instance %d", rf.me, i)
+			reply := &RequestVoteReply{}
+			start := time.Now()
+			ok := rf.sendRequestVote(i, args, reply)
+			DPrintf("Raft instance %d received response for RequestVote from instance %d. elapsed=%d", rf.me, i, time.Since(start).Milliseconds())
+			resultCh <- struct {
+				ok    bool
+				id    int
+				reply *RequestVoteReply
+			}{ok, i, reply}
+		}()
+	}
+
+	votes := 1 // count me as +1 vote
+	waitForCount := len(rf.peers) - 1
+	for range waitForCount {
+		result := <-resultCh
+		DPrintf("Raft instance %d retrieved response for RequestVote from instance %d from the channel", rf.me, result.id)
+		if result.ok {
+			if result.reply.VoteGranted {
+				votes++
+				if votes >= rf.majority {
+					return true, votes
+				}
+			}
+			// Candidate: if reply.Term > currentTerm: transition to follower and break election:
+			// "If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)"
+			breakElection := false
+			rf.mu.Lock()
+			if result.reply.Term > rf.currentTerm {
+				DPrintf("Raft instance %d detected higher term %d while election. Converting to follower", rf.me, result.reply.Term)
+				rf.currentTerm = result.reply.Term
+				rf.votedFor = votedForNone
+				rf.transitionPeerState(Follower)
+				breakElection = true
+			}
+			rf.mu.Unlock()
+			if breakElection {
+				return false, votes
+			}
+		}
+	}
+	DPrintf("Raft instance %d waited for all voters", rf.me)
+	return false, votes
 }
 
-// example RequestVote RPC handler.
-func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Your code here (3A, 3B).
+func (rf *Raft) collectQuorumVotes_old() (bool, int) {
+	votes := 1 // count me as +1 vote
+	args := &RequestVoteArgs{
+		Term:        rf.currentTerm,
+		CandidateId: rf.me,
+		// 3B
+	}
+	for i := range rf.peers {
+		if i == rf.me {
+			continue
+		}
+
+		reply := &RequestVoteReply{}
+		DPrintf("Raft instance %d requests vote from instance %d", rf.me, i)
+		start := time.Now()
+		ok := rf.sendRequestVote(i, args, reply)
+		DPrintf("Raft instance %d received response for RequestVote from instance %d. elapsed=%d", rf.me, i, time.Since(start).Milliseconds())
+		if ok && reply.VoteGranted {
+			votes++
+		}
+
+		// ? TODO if received 2 of 5 false, return false, don't wait for all
+		// mb not: mb we need to wait all for the term
+
+		// Candidate: if reply.Term > currentTerm: transition to follower and break election:
+		// "If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)"
+		breakElection := false
+		rf.mu.Lock()
+		if reply.Term > rf.currentTerm {
+			DPrintf("Raft instance %d detected higher term %d while election. Converting to follower", rf.me, reply.Term)
+			rf.currentTerm = reply.Term
+			rf.votedFor = votedForNone
+			rf.transitionPeerState(Follower)
+			breakElection = true
+		}
+		rf.mu.Unlock()
+		if breakElection {
+			return false, votes
+		}
+
+		if votes >= rf.majority {
+			return true, votes
+		}
+	}
+	return false, votes
+}
+
+func (rf *Raft) transitionPeerState(newState PeerState) {
+	switch rf.peerState {
+	case Follower:
+		if newState == Follower {
+			return
+		}
+		if newState == Leader {
+			panic(fmt.Sprintf("Invalid peer transition from %d to %d", rf.peerState, newState))
+		}
+
+	case Candidate:
+		if newState == Candidate {
+			return
+		}
+	case Leader:
+		if newState == Leader {
+			return
+		}
+		if newState == Candidate {
+			panic(fmt.Sprintf("Invalid peer transition from %d to %d", rf.peerState, newState))
+		}
+	default:
+		panic(fmt.Sprintf("invalid peer state %d", newState))
+	}
+	rf.peerState = newState
+}
+
+func (rf *Raft) resetElectionTimeout() {
+	rf.electionTimeoutMs = 300 + (rand.Int63() % 500)
+}
+
+func (rf *Raft) resetHeartbeatTimout() {
+	rf.heartbeatMu.Lock()
+	defer rf.heartbeatMu.Unlock()
+	rf.lastHeartbeatReceivedAt = time.Now()
+}
+
+func (rf *Raft) electionTimeoutElapsed() bool {
+	rf.heartbeatMu.Lock()
+	defer rf.heartbeatMu.Unlock()
+	elapsed := time.Since(rf.lastHeartbeatReceivedAt)
+	return elapsed.Milliseconds() >= rf.electionTimeoutMs
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -150,6 +354,103 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
+// example RequestVote RPC arguments structure.
+// field names must start with capital letters!
+type RequestVoteArgs struct {
+	// Your data here (3A, 3B).
+	Term        int
+	CandidateId int
+}
+
+// example RequestVote RPC reply structure.
+// field names must start with capital letters!
+type RequestVoteReply struct {
+	// Your data here (3A).
+	Term        int
+	VoteGranted bool
+}
+
+// RequestVote RPC handler.
+func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
+	// Your code here (3A, 3B).
+	// ??? Why not 3C? We don't need to persist currentTerm and votedFor?
+	DPrintf("Raft instance %d received RequestVote from id=%d", rf.me, args.CandidateId)
+	if args.CandidateId == rf.me {
+		panic(fmt.Sprintf("received RequestVote from self id=%d", rf.me))
+	}
+
+	rf.mu.Lock()
+	// If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)
+	if args.Term > rf.currentTerm {
+
+		DPrintf("Raft instance %d detected higher term %d in RequestVote request. Converting to follower", rf.me, args.Term)
+		// TODO persistence (3C)
+		rf.currentTerm = args.Term
+		rf.votedFor = votedForNone // correct? no info in paper for votedFor
+		rf.transitionPeerState(Follower)
+	}
+
+	reply.Term = rf.currentTerm
+	// 1. Reply false if args.term < currentTerm (§5.1)
+	// 2. If votedFor is null or candidateId, and candidate’s log is at
+	//    least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
+	reply.VoteGranted = false
+	// TODO  check log watermarks (3B)
+	if (rf.currentTerm >= args.Term) && ((rf.votedFor == votedForNone) || (rf.votedFor == args.CandidateId)) {
+		// TODO persistence (3C)
+		reply.VoteGranted = true
+		rf.votedFor = args.CandidateId
+	}
+	rf.mu.Unlock()
+
+	// Granging vote to candidate = heartbeat:
+	// If election timeout elapses without receiving AppendEntries RPC from current leader or granting vote to candidate: convert to candidate
+	if reply.VoteGranted {
+		rf.resetHeartbeatTimout() // careful: locking inside
+	}
+}
+
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	return ok
+}
+
+// AppendEntries RPC handler.
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	//DPrintf("Raft instance %d received AppendEntries from id=%d", rf.me, args.LeaderId)
+	if args.LeaderId == rf.me {
+		panic(fmt.Sprintf("received AppendEntries from self id=%d", rf.me))
+	}
+
+	rf.mu.Lock()
+	reply.Success = false
+	if args.Term >= rf.currentTerm {
+		reply.Success = true
+
+		rf.resetHeartbeatTimout()
+
+		if args.Term > rf.currentTerm {
+			DPrintf("Raft instance %d detected higher term %d while handling heartbeat. Converting to follower", rf.me, args.Term)
+			rf.currentTerm = args.Term
+			rf.votedFor = votedForNone
+			rf.transitionPeerState(Follower)
+		}
+	}
+	reply.Term = rf.currentTerm
+	rf.mu.Unlock()
+}
+
+// field names must start with capital letters!
+type AppendEntriesArgs struct {
+	Term     int
+	LeaderId int
+}
+
+// field names must start with capital letters!
+type AppendEntriesReply struct {
+	Term    int
+	Success bool
+}
 
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
@@ -170,8 +471,75 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	// Your code here (3B).
 
-
 	return index, term, isLeader
+}
+
+// return currentTerm and whether this server
+// believes it is the leader.
+func (rf *Raft) GetState() (int, bool) {
+
+	var term int
+	var isleader bool
+	// Your code here (3A).
+	rf.mu.Lock()
+	term = rf.currentTerm
+	isleader = rf.peerState == Leader
+	rf.mu.Unlock()
+	return term, isleader
+}
+
+// save Raft's persistent state to stable storage,
+// where it can later be retrieved after a crash and restart.
+// see paper's Figure 2 for a description of what should be persistent.
+// before you've implemented snapshots, you should pass nil as the
+// second argument to persister.Save().
+// after you've implemented snapshots, pass the current snapshot
+// (or nil if there's not yet a snapshot).
+func (rf *Raft) persist() {
+	// Your code here (3C).
+	// Example:
+	// w := new(bytes.Buffer)
+	// e := labgob.NewEncoder(w)
+	// e.Encode(rf.xxx)
+	// e.Encode(rf.yyy)
+	// raftstate := w.Bytes()
+	// rf.persister.Save(raftstate, nil)
+}
+
+// restore previously persisted state.
+func (rf *Raft) readPersist(data []byte) {
+	if data == nil || len(data) < 1 { // bootstrap without any state?
+		return
+	}
+	// Your code here (3C).
+	// Example:
+	// r := bytes.NewBuffer(data)
+	// d := labgob.NewDecoder(r)
+	// var xxx
+	// var yyy
+	// if d.Decode(&xxx) != nil ||
+	//    d.Decode(&yyy) != nil {
+	//   error...
+	// } else {
+	//   rf.xxx = xxx
+	//   rf.yyy = yyy
+	// }
+}
+
+// how many bytes in Raft's persisted log?
+func (rf *Raft) PersistBytes() int {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	return rf.persister.RaftStateSize()
+}
+
+// the service says it has created a snapshot that has
+// all info up to and including index. this means the
+// service no longer needs the log through (and including)
+// that index. Raft should now trim its log as much as possible.
+func (rf *Raft) Snapshot(index int, snapshot []byte) {
+	// Your code here (3D).
+
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -191,46 +559,4 @@ func (rf *Raft) Kill() {
 func (rf *Raft) killed() bool {
 	z := atomic.LoadInt32(&rf.dead)
 	return z == 1
-}
-
-func (rf *Raft) ticker() {
-	for rf.killed() == false {
-
-		// Your code here (3A)
-		// Check if a leader election should be started.
-
-
-		// pause for a random amount of time between 50 and 350
-		// milliseconds.
-		ms := 50 + (rand.Int63() % 300)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
-	}
-}
-
-// the service or tester wants to create a Raft server. the ports
-// of all the Raft servers (including this one) are in peers[]. this
-// server's port is peers[me]. all the servers' peers[] arrays
-// have the same order. persister is a place for this server to
-// save its persistent state, and also initially holds the most
-// recent saved state, if any. applyCh is a channel on which the
-// tester or service expects Raft to send ApplyMsg messages.
-// Make() must return quickly, so it should start goroutines
-// for any long-running work.
-func Make(peers []*labrpc.ClientEnd, me int,
-	persister *tester.Persister, applyCh chan raftapi.ApplyMsg) raftapi.Raft {
-	rf := &Raft{}
-	rf.peers = peers
-	rf.persister = persister
-	rf.me = me
-
-	// Your initialization code here (3A, 3B, 3C).
-
-	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
-
-	// start ticker goroutine to start elections
-	go rf.ticker()
-
-
-	return rf
 }
