@@ -46,7 +46,7 @@ type Raft struct {
 	peerState               PeerState
 	currentTerm             int
 	votedFor                int
-	electionTimeoutMs       int64
+	electionTimeoutMs       int
 	majority                int
 	lastHeartbeatReceivedAt time.Time
 }
@@ -198,13 +198,13 @@ func (rf *Raft) checkElection() {
 
 			rf.mu.Lock()
 			rf.transitionPeerState(Candidate)
-			rf.resetElectionTimeout()
+			electionTimeoutMs := rf.resetElectionTimeout()
 			rf.currentTerm++
 			currentTerm := rf.currentTerm
 			rf.votedFor = rf.me
 			rf.mu.Unlock()
 
-			success, votes := rf.collectQuorumVotes(currentTerm)
+			success, votes := rf.collectQuorumVotes(currentTerm, electionTimeoutMs)
 			if success {
 				DPrintf("Raft instance %d received majority votes (%d), becoming leader", rf.me, votes)
 				rf.mu.Lock()
@@ -230,11 +230,13 @@ func (rf *Raft) checkElection() {
 	}
 }
 
-func (rf *Raft) resetElectionTimeout() {
-	rf.electionTimeoutMs = 500 + (rand.Int63() % 500)
+func (rf *Raft) resetElectionTimeout() int {
+	newTimeoutMs := 500 + (int(rand.Int31()) % 500)
+	rf.electionTimeoutMs = newTimeoutMs
+	return newTimeoutMs
 }
 
-func (rf *Raft) collectQuorumVotes(currentTerm int) (bool, int) {
+func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int) (bool, int) {
 	args := &RequestVoteArgs{
 		// term is passed as parameter so the peer votes with an immutable term atomically read when the peer was a candidate. if the term is obsolete it will be fenced.
 		// cause: if term is read from the state non atomically (e.g. here), it could be already have been incremented by RPCs and the candidate already fallen back to follower.
@@ -268,36 +270,45 @@ func (rf *Raft) collectQuorumVotes(currentTerm int) (bool, int) {
 
 	votes := 1 // count me as +1 vote
 	waitForCount := len(rf.peers) - 1
-	for range waitForCount {
-		result := <-resultCh
-		//DPrintf("Raft instance %d retrieved response for RequestVote from instance %d from the channel", rf.me, result.id)
-		if result.ok {
-			// Candidate: if reply.Term > currentTerm: transition to follower and break election:
-			// "If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)"
-			breakElection := false
-			rf.mu.Lock()
-			if result.reply.Term > rf.currentTerm {
-				DPrintf("Raft instance %d detected higher term %d while election. Converting to follower", rf.me, result.reply.Term)
-				rf.currentTerm = result.reply.Term
-				rf.votedFor = votedForNone
-				rf.transitionPeerState(Follower)
-				breakElection = true
-			}
-			rf.mu.Unlock()
-			if breakElection {
-				return false, votes
-			}
-
-			if result.reply.VoteGranted {
-				votes++
-				if votes >= rf.majority {
-					return true, votes
+	waited := 0
+	for {
+		select {
+		case <-time.After(time.Duration(electionTimeoutMs) * time.Millisecond):
+			DPrintf("Raft instance %d hasn't election timeout of %d ms elapsed. Breaking election", rf.me, electionTimeoutMs)
+			return false, votes
+		case result := <-resultCh:
+			//DPrintf("Raft instance %d retrieved response for RequestVote from instance %d from the channel", rf.me, result.id)
+			if result.ok {
+				// Candidate: if reply.Term > currentTerm: transition to follower and break election:
+				// "If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)"
+				higherTermSeen := false
+				rf.mu.Lock()
+				if result.reply.Term > rf.currentTerm {
+					DPrintf("Raft instance %d detected higher term %d while election. Converting to follower", rf.me, result.reply.Term)
+					higherTermSeen = true
+					rf.currentTerm = result.reply.Term
+					rf.votedFor = votedForNone
+					rf.transitionPeerState(Follower)
 				}
+				rf.mu.Unlock()
+				if higherTermSeen {
+					return false, votes
+				}
+
+				if result.reply.VoteGranted {
+					votes++
+					if votes >= rf.majority {
+						return true, votes
+					}
+				}
+			}
+			waited++
+			if waited >= waitForCount {
+				DPrintf("Raft instance %d waited for all voters, but got no succesful quorum with (%d) votes", rf.me, votes)
+				return false, votes
 			}
 		}
 	}
-	DPrintf("Raft instance %d waited for all voters", rf.me)
-	return false, votes
 }
 
 func (rf *Raft) collectQuorumVotes_sequential() (bool, int) {
@@ -379,7 +390,7 @@ func (rf *Raft) resetHeartbeatTimeout() {
 
 func (rf *Raft) electionTimeoutElapsed() bool {
 	elapsed := time.Since(rf.lastHeartbeatReceivedAt)
-	return elapsed.Milliseconds() >= rf.electionTimeoutMs
+	return elapsed.Milliseconds() >= int64(rf.electionTimeoutMs)
 }
 
 // example code to send a RequestVote RPC to a server.
