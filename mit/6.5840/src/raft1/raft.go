@@ -185,12 +185,6 @@ func (rf *Raft) startElection() {
 	}
 }
 
-func (rf *Raft) resetElectionTimeout() int {
-	newTimeoutMs := 500 + (int(rand.Int31()) % 500)
-	rf.electionTimeoutMs = newTimeoutMs
-	return newTimeoutMs
-}
-
 func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int) (bool, int) {
 	args := &RequestVoteArgs{
 		// term is passed as parameter so the peer votes with an immutable term atomically read when the peer was a candidate. if the term is obsolete it will be fenced.
@@ -289,6 +283,12 @@ func (rf *Raft) transitionPeerState(newState PeerState) {
 	rf.peerState = newState
 }
 
+func (rf *Raft) resetElectionTimeout() int {
+	newTimeoutMs := 500 + (int(rand.Int31()) % 500)
+	rf.electionTimeoutMs = newTimeoutMs
+	return newTimeoutMs
+}
+
 func (rf *Raft) resetHeartbeatTimeout() {
 	rf.lastHeartbeatReceivedAt = time.Now()
 }
@@ -296,6 +296,48 @@ func (rf *Raft) resetHeartbeatTimeout() {
 func (rf *Raft) electionTimeoutElapsed() bool {
 	elapsed := time.Since(rf.lastHeartbeatReceivedAt)
 	return elapsed.Milliseconds() >= int64(rf.electionTimeoutMs)
+}
+
+func (rf *Raft) handleHearbeat(term int) bool {
+	if term >= rf.currentTerm {
+		rf.resetHeartbeatTimeout() // reset only after term check: ignore heartbeats from zombie leaders
+		if rf.increaseTerm(term) {
+			DPrintf("Raft instance %d detected higher term %d while handling heartbeat. Converting to follower", rf.me, term)
+		}
+		return true
+	}
+	return false // hearbeat from zombie leader
+}
+
+func (rf *Raft) voteForCandidate(candidateId, candidateTerm int) bool {
+	// If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)
+	if rf.increaseTerm(candidateTerm) {
+		DPrintf("Raft instance %d detected higher term %d in RequestVote request. Converting to follower", rf.me, candidateTerm)
+	}
+	// 1. Reply false if args.term < currentTerm (§5.1)
+	// 2. If votedFor is null or candidateId, and candidate’s log is at
+	//    least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
+	// TODO  check log watermarks (3B)
+	if (rf.currentTerm <= candidateTerm) && ((rf.votedFor == votedForNone) || (rf.votedFor == candidateId)) {
+		// TODO persistence (3C)
+		rf.votedFor = candidateId
+		// Granging vote to candidate = heartbeat:
+		// "If election timeout elapses without receiving AppendEntries RPC from current leader or granting vote to candidate: convert to candidate"
+		rf.resetHeartbeatTimeout()
+		return true
+	}
+	return false
+}
+
+func (rf *Raft) increaseTerm(newTerm int) bool {
+	if newTerm > rf.currentTerm {
+		// TODO persistence (3C)
+		rf.currentTerm = newTerm
+		rf.votedFor = votedForNone
+		rf.transitionPeerState(Follower)
+		return true
+	}
+	return false
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -330,6 +372,37 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	return ok
+}
+
+// RequestVote RPC handler
+func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
+	// Your code here (3A, 3B).
+	// ??? Why not 3C? We don't need to persist currentTerm and votedFor?
+	if args.CandidateId == rf.me {
+		panic(fmt.Sprintf("received RequestVote from self id=%d", rf.me))
+	}
+	rf.mu.Lock()
+	reply.VoteGranted = rf.voteForCandidate(args.CandidateId, args.Term)
+	reply.Term = rf.currentTerm
+	DPrintf("Raft instance %d processed RequestVote from id=%d. currentTerm=%d votedFor=%d. Result: voteGranted=%v", rf.me, args.CandidateId, rf.currentTerm, rf.votedFor, reply.VoteGranted)
+	rf.mu.Unlock()
+}
+
+// AppendEntries RPC handler
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	//DPrintf("Raft instance %d received AppendEntries from id=%d", rf.me, args.LeaderId)
+	if args.LeaderId == rf.me {
+		panic(fmt.Sprintf("received AppendEntries from self id=%d", rf.me))
+	}
+	rf.mu.Lock()
+	reply.Success = rf.handleHearbeat(args.Term) // 3B: log == nil: heartbeat
+	reply.Term = rf.currentTerm
+	rf.mu.Unlock()
+}
+
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 type RequestVoteArgs struct {
@@ -344,77 +417,6 @@ type RequestVoteReply struct {
 	// Your data here (3A).
 	Term        int
 	VoteGranted bool
-}
-
-// RequestVote RPC handler.
-func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Your code here (3A, 3B).
-	// ??? Why not 3C? We don't need to persist currentTerm and votedFor?
-	if args.CandidateId == rf.me {
-		panic(fmt.Sprintf("received RequestVote from self id=%d", rf.me))
-	}
-
-	rf.mu.Lock()
-	// If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)
-	if rf.increaseTerm(args.Term) {
-		DPrintf("Raft instance %d detected higher term %d in RequestVote request. Converting to follower", rf.me, args.Term)
-	}
-
-	reply.Term = rf.currentTerm
-	// 1. Reply false if args.term < currentTerm (§5.1)
-	// 2. If votedFor is null or candidateId, and candidate’s log is at
-	//    least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
-	reply.VoteGranted = false
-	// TODO  check log watermarks (3B)
-	if (rf.currentTerm <= args.Term) && ((rf.votedFor == votedForNone) || (rf.votedFor == args.CandidateId)) {
-		// TODO persistence (3C)
-		reply.VoteGranted = true
-		rf.votedFor = args.CandidateId
-		// Granging vote to candidate = heartbeat:
-		// "If election timeout elapses without receiving AppendEntries RPC from current leader or granting vote to candidate: convert to candidate"
-		rf.resetHeartbeatTimeout()
-	}
-	DPrintf("Raft instance %d processed RequestVote from id=%d. currentTerm=%d votedFor=%d. Result: voteGranted=%v", rf.me, args.CandidateId, rf.currentTerm, rf.votedFor, reply.VoteGranted)
-	rf.mu.Unlock()
-}
-
-func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-	return ok
-}
-
-// AppendEntries RPC handler.
-func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	//DPrintf("Raft instance %d received AppendEntries from id=%d", rf.me, args.LeaderId)
-	if args.LeaderId == rf.me {
-		panic(fmt.Sprintf("received AppendEntries from self id=%d", rf.me))
-	}
-	rf.mu.Lock()
-	reply.Success = rf.handleHearbeat(args.Term) // 3B: log == nil: heartbeat
-	reply.Term = rf.currentTerm
-	rf.mu.Unlock()
-}
-
-func (rf *Raft) handleHearbeat(term int) bool {
-	if term >= rf.currentTerm {
-		rf.resetHeartbeatTimeout() // reset only after term check: ignore heartbeats from zombie leaders
-		if rf.increaseTerm(term) {
-			DPrintf("Raft instance %d detected higher term %d while handling heartbeat. Converting to follower", rf.me, term)
-		}
-		return true
-	}
-	return false // hearbeat from zombie leader
-}
-
-func (rf *Raft) increaseTerm(newTerm int) bool {
-	if newTerm > rf.currentTerm {
-		// TODO persistence (3C)
-		rf.currentTerm = newTerm
-		rf.votedFor = votedForNone
-		rf.transitionPeerState(Follower)
-		return true
-	}
-	return false
 }
 
 // field names must start with capital letters!
