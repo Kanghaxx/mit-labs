@@ -78,7 +78,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	go rf.checkElection()
+	go rf.startElection()
 	go rf.startHeartbeats()
 
 	DPrintf("raft instance %d started", rf.me)
@@ -131,18 +131,15 @@ func (rf *Raft) startHeartbeats() {
 	for result := range resultCh {
 		if result.ok {
 			rf.mu.Lock()
-			if result.reply.Term > rf.currentTerm {
+			if rf.increaseTerm(result.reply.Term) {
 				DPrintf("Raft instance %d detected higher term %d on heartbeat response from %d. Converting to follower", rf.me, result.id, result.reply.Term)
-				rf.currentTerm = result.reply.Term
-				rf.votedFor = votedForNone
-				rf.transitionPeerState(Follower)
 			}
 			rf.mu.Unlock()
 		}
 	}
 }
 
-func (rf *Raft) checkElection() {
+func (rf *Raft) startElection() {
 	for rf.killed() == false {
 		// Your code here (3A)
 		// Check if a leader election should be started.
@@ -241,16 +238,13 @@ func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int) (bool
 				// "If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)"
 				higherTermSeen := false
 				rf.mu.Lock()
-				if result.reply.Term > rf.currentTerm {
-					DPrintf("Raft instance %d detected higher term %d while election. Converting to follower", rf.me, result.reply.Term)
+				if rf.increaseTerm(result.reply.Term) {
 					higherTermSeen = true
-					rf.currentTerm = result.reply.Term
-					rf.votedFor = votedForNone
-					rf.transitionPeerState(Follower)
+					DPrintf("Raft instance %d detected higher term %d while election. Converting to follower", rf.me, result.reply.Term)
 				}
 				rf.mu.Unlock()
 				if higherTermSeen {
-					return false, votes
+					return false, votes // not a candidate anymore
 				}
 
 				if result.reply.VoteGranted {
@@ -362,12 +356,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	rf.mu.Lock()
 	// If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)
-	if args.Term > rf.currentTerm {
+	if rf.increaseTerm(args.Term) {
 		DPrintf("Raft instance %d detected higher term %d in RequestVote request. Converting to follower", rf.me, args.Term)
-		// TODO persistence (3C)
-		rf.currentTerm = args.Term
-		rf.votedFor = votedForNone // correct? no info in paper for votedFor
-		rf.transitionPeerState(Follower)
 	}
 
 	reply.Term = rf.currentTerm
@@ -405,15 +395,23 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term >= rf.currentTerm {
 		reply.Success = true
 		rf.resetHeartbeatTimeout() // reset only after term check: ignore heartbeats from zombie leaders
-		if args.Term > rf.currentTerm {
+		if rf.increaseTerm(args.Term) {
 			DPrintf("Raft instance %d detected higher term %d while handling heartbeat. Converting to follower", rf.me, args.Term)
-			rf.currentTerm = args.Term
-			rf.votedFor = votedForNone
-			rf.transitionPeerState(Follower)
 		}
 	}
 	reply.Term = rf.currentTerm
 	rf.mu.Unlock()
+}
+
+func (rf *Raft) increaseTerm(newTerm int) bool {
+	if newTerm > rf.currentTerm {
+		// TODO persistence (3C)
+		rf.currentTerm = newTerm
+		rf.votedFor = votedForNone
+		rf.transitionPeerState(Follower)
+		return true
+	}
+	return false
 }
 
 // field names must start with capital letters!
