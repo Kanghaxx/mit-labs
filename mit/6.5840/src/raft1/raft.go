@@ -98,7 +98,6 @@ func (rf *Raft) startHeartbeats() {
 		}
 		go func(serverid int) {
 			for rf.killed() == false {
-				//peerState := PeerState(atomic.LoadInt32((*int32)(&rf.peerState)))
 				rf.mu.Lock()
 				peerState := rf.peerState
 				currentTerm := rf.currentTerm
@@ -111,15 +110,20 @@ func (rf *Raft) startHeartbeats() {
 					}
 					reply := &AppendEntriesReply{}
 					start := time.Now()
-					ok := rf.sendAppendEntries(serverid, args, reply)
-					DPrintf("Raft instance %d sent heartbit to instance %d. elapsed=%d", rf.me, i, time.Since(start).Milliseconds())
-					resultCh <- struct {
-						ok    bool
-						id    int
-						reply *AppendEntriesReply
-					}{ok, serverid, reply}
+					// Heartbeats are sent via fire and forget. In-flight requests could stack and grow indefinitely.
+					// But if sent sequentially, tests fail on bad network due to strict timing: a single lost response leads to heatrbeats pause for a peer until it times out.
+					// Follow-up: throttle in-flight requests (semaphore etc).
+					go func() {
+						ok := rf.sendAppendEntries(serverid, args, reply)
+						DPrintf("Raft instance %d sent heartbeat to instance %d. ok=%v elapsed=%d", rf.me, i, ok, time.Since(start).Milliseconds())
+						resultCh <- struct {
+							ok    bool
+							id    int
+							reply *AppendEntriesReply
+						}{ok, serverid, reply}
+					}()
 				}
-				time.Sleep(time.Duration(200) * time.Millisecond)
+				time.Sleep(time.Duration(150) * time.Millisecond)
 			}
 		}(i)
 	}
@@ -138,7 +142,7 @@ func (rf *Raft) startHeartbeats() {
 	}
 }
 
-func (rf *Raft) startHeartbeats_old() {
+func (rf *Raft) startHeartbeats_sequential() {
 	for rf.killed() == false {
 		rf.mu.Lock()
 		peerState := rf.peerState
@@ -208,7 +212,7 @@ func (rf *Raft) checkElection() {
 				// mb not: it passed and fails randomly. may be another reason
 				if (rf.peerState == Candidate) && (rf.currentTerm == currentTerm) { // could have been changed to Follower by RPCs
 					rf.transitionPeerState(Leader)
-					DPrintf("Raft instance %d is now LEADER. Current state = %d", rf.me, rf.peerState)
+					DPrintf("Raft instance %d is now LEADER for term %d", rf.me, rf.currentTerm)
 				} else {
 					DPrintf("Raft instance %d transition to leader fail: already fallen back to follower", rf.me)
 				}
@@ -220,14 +224,14 @@ func (rf *Raft) checkElection() {
 
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
-		//ms := 200 + (rand.Int63() % 500)
+		//ms := 50 + (rand.Int63() % 350)
 		//time.Sleep(time.Duration(ms) * time.Millisecond)
 		time.Sleep(time.Duration(50) * time.Millisecond)
 	}
 }
 
 func (rf *Raft) resetElectionTimeout() {
-	rf.electionTimeoutMs = 500 + (rand.Int63() % 600)
+	rf.electionTimeoutMs = 500 + (rand.Int63() % 500)
 }
 
 func (rf *Raft) collectQuorumVotes(currentTerm int) (bool, int) {
@@ -296,7 +300,7 @@ func (rf *Raft) collectQuorumVotes(currentTerm int) (bool, int) {
 	return false, votes
 }
 
-func (rf *Raft) collectQuorumVotes_old() (bool, int) {
+func (rf *Raft) collectQuorumVotes_sequential() (bool, int) {
 	votes := 1 // count me as +1 vote
 	args := &RequestVoteArgs{
 		Term:        rf.currentTerm,
@@ -352,7 +356,6 @@ func (rf *Raft) transitionPeerState(newState PeerState) {
 		if newState == Leader {
 			panic(fmt.Sprintf("Invalid peer transition from %d to %d", rf.peerState, newState))
 		}
-
 	case Candidate:
 		if newState == Candidate {
 			return
