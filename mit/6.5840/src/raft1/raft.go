@@ -389,18 +389,21 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.LeaderId == rf.me {
 		panic(fmt.Sprintf("received AppendEntries from self id=%d", rf.me))
 	}
-
 	rf.mu.Lock()
-	reply.Success = false
-	if args.Term >= rf.currentTerm {
-		reply.Success = true
-		rf.resetHeartbeatTimeout() // reset only after term check: ignore heartbeats from zombie leaders
-		if rf.increaseTerm(args.Term) {
-			DPrintf("Raft instance %d detected higher term %d while handling heartbeat. Converting to follower", rf.me, args.Term)
-		}
-	}
+	reply.Success = rf.handleHearbeat(args.Term) // 3B: log == nil: heartbeat
 	reply.Term = rf.currentTerm
 	rf.mu.Unlock()
+}
+
+func (rf *Raft) handleHearbeat(term int) bool {
+	if term >= rf.currentTerm {
+		rf.resetHeartbeatTimeout() // reset only after term check: ignore heartbeats from zombie leaders
+		if rf.increaseTerm(term) {
+			DPrintf("Raft instance %d detected higher term %d while handling heartbeat. Converting to follower", rf.me, term)
+		}
+		return true
+	}
+	return false // hearbeat from zombie leader
 }
 
 func (rf *Raft) increaseTerm(newTerm int) bool {
