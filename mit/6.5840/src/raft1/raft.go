@@ -142,48 +142,6 @@ func (rf *Raft) startHeartbeats() {
 	}
 }
 
-func (rf *Raft) startHeartbeats_sequential() {
-	for rf.killed() == false {
-		rf.mu.Lock()
-		peerState := rf.peerState
-		currentTerm := rf.currentTerm
-		rf.mu.Unlock()
-		// TODO check currentTerm atomicity in RequestVote handler and response
-
-		//peerState := PeerState(atomic.LoadInt32((*int32)(&rf.peerState)))
-		if peerState == Leader {
-			// send heartbits
-
-			// TODO send in parallel
-			// mb each peer has a goroutine and each gorutine has a sync cycle in it. to avoid 1 slow peer to slow down all other
-
-			for i := range rf.peers {
-				if i == rf.me {
-					continue
-				}
-				args := &AppendEntriesArgs{
-					Term:     currentTerm,
-					LeaderId: rf.me,
-				}
-				reply := &AppendEntriesReply{}
-				ok := rf.sendAppendEntries(i, args, reply)
-				DPrintf("raft instance %d sent heartbit to instance %d", rf.me, i)
-				if ok {
-					rf.mu.Lock()
-					if reply.Term > rf.currentTerm {
-						DPrintf("Raft instance %d detected higher term %d on heartbeat response from %d. Converting to follower", rf.me, i, reply.Term)
-						rf.currentTerm = reply.Term
-						rf.votedFor = votedForNone
-						rf.transitionPeerState(Follower)
-					}
-					rf.mu.Unlock()
-				}
-			}
-		}
-		time.Sleep(time.Duration(150) * time.Millisecond)
-	}
-}
-
 func (rf *Raft) checkElection() {
 	for rf.killed() == false {
 		// Your code here (3A)
@@ -309,53 +267,6 @@ func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int) (bool
 			}
 		}
 	}
-}
-
-func (rf *Raft) collectQuorumVotes_sequential() (bool, int) {
-	votes := 1 // count me as +1 vote
-	args := &RequestVoteArgs{
-		Term:        rf.currentTerm,
-		CandidateId: rf.me,
-		// 3B
-	}
-	for i := range rf.peers {
-		if i == rf.me {
-			continue
-		}
-
-		reply := &RequestVoteReply{}
-		DPrintf("Raft instance %d requests vote from instance %d", rf.me, i)
-		start := time.Now()
-		ok := rf.sendRequestVote(i, args, reply)
-		DPrintf("Raft instance %d received response for RequestVote from instance %d. elapsed=%d", rf.me, i, time.Since(start).Milliseconds())
-		if ok && reply.VoteGranted {
-			votes++
-		}
-
-		// ? TODO if received 2 of 5 false, return false, don't wait for all
-		// mb not: mb we need to wait all for the term
-
-		// Candidate: if reply.Term > currentTerm: transition to follower and break election:
-		// "If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)"
-		breakElection := false
-		rf.mu.Lock()
-		if reply.Term > rf.currentTerm {
-			DPrintf("Raft instance %d detected higher term %d while election. Converting to follower", rf.me, reply.Term)
-			rf.currentTerm = reply.Term
-			rf.votedFor = votedForNone
-			rf.transitionPeerState(Follower)
-			breakElection = true
-		}
-		rf.mu.Unlock()
-		if breakElection {
-			return false, votes
-		}
-
-		if votes >= rf.majority {
-			return true, votes
-		}
-	}
-	return false, votes
 }
 
 func (rf *Raft) transitionPeerState(newState PeerState) {
