@@ -30,6 +30,7 @@ const (
 
 const (
 	votedForNone = -1
+	noneTerm     = -1
 )
 
 // A Go object implementing a single Raft peer.
@@ -98,23 +99,15 @@ func (rf *Raft) startHeartbeats() {
 		}
 		go func(serverid int) {
 			for rf.killed() == false {
-				rf.mu.Lock()
-				peerState := rf.peerState
-				currentTerm := rf.currentTerm
-				rf.mu.Unlock()
-				if peerState == Leader {
-					// send heartbits
-					args := &AppendEntriesArgs{
-						Term:     currentTerm,
-						LeaderId: rf.me,
-					}
-					reply := &AppendEntriesReply{}
+				currentTerm, isLeader := rf.GetState() // locking inside
+				if isLeader {
+					// Send heartbits
 					start := time.Now()
 					// Heartbeats are sent via fire and forget. In-flight requests could stack and grow indefinitely.
 					// But if sent sequentially, tests fail on bad network due to strict timing: a single lost response leads to heatrbeats pause for a peer until it times out.
 					// Follow-up: throttle in-flight requests (semaphore etc).
 					go func() {
-						ok := rf.sendAppendEntries(serverid, args, reply)
+						ok, reply := rf.sendHeartbeat(serverid, currentTerm, rf.me)
 						DPrintf("Raft instance %d sent heartbeat to instance %d. ok=%v elapsed=%d", rf.me, i, ok, time.Since(start).Milliseconds())
 						resultCh <- struct {
 							ok    bool
@@ -128,6 +121,7 @@ func (rf *Raft) startHeartbeats() {
 		}(i)
 	}
 
+	// handle heartbeat responses
 	for result := range resultCh {
 		if result.ok {
 			rf.mu.Lock()
@@ -143,57 +137,45 @@ func (rf *Raft) startElection() {
 	for rf.killed() == false {
 		// Your code here (3A)
 		// Check if a leader election should be started.
-		startElection := false
+		needElection := false
 		rf.mu.Lock()
-		startElection = (rf.peerState != Leader) && rf.electionTimeoutElapsed()
+		needElection = rf.needElection()
 		rf.mu.Unlock()
-		if startElection {
+		if needElection {
 			// Start election
 			DPrintf("Raft instance %d election timeout elapsed, starting election", rf.me)
-
 			rf.mu.Lock()
-			rf.transitionPeerState(Candidate)
-			electionTimeoutMs := rf.resetElectionTimeout()
-			rf.currentTerm++
-			currentTerm := rf.currentTerm
-			rf.votedFor = rf.me
+			currentTerm, electionTimeoutMs := rf.transitionToCandidate()
 			rf.mu.Unlock()
 
-			success, votes := rf.collectQuorumVotes(currentTerm, electionTimeoutMs)
+			success, higherTermSeen, higherTerm, votes := rf.collectQuorumVotes(currentTerm, electionTimeoutMs)
 			if success {
 				DPrintf("Raft instance %d received majority votes (%d), becoming leader", rf.me, votes)
 				rf.mu.Lock()
-				// TODO why this breaks condition?: && (rf.currentTerm == currentTerm)
-				// mb not: it passed and fails randomly. may be another reason
-				if (rf.peerState == Candidate) && (rf.currentTerm == currentTerm) { // could have been changed to Follower by RPCs
-					rf.transitionPeerState(Leader)
+				if rf.transitionToLeader(currentTerm) {
 					DPrintf("Raft instance %d is now LEADER for term %d", rf.me, rf.currentTerm)
 				} else {
 					DPrintf("Raft instance %d transition to leader fail: already fallen back to follower", rf.me)
 				}
 				rf.mu.Unlock()
 			} else {
-				DPrintf("Raft instance %d received only %d votes, staying as candidate", rf.me, votes)
+				if higherTermSeen {
+					rf.mu.Lock()
+					if rf.increaseTerm(higherTerm) {
+						DPrintf("Raft instance %d detected higher term %d while election. Converting to follower", rf.me, higherTerm)
+					}
+					rf.mu.Unlock()
+				} else {
+					DPrintf("Raft instance %d received only %d votes, staying as candidate", rf.me, votes)
+				}
 			}
 		}
 
-		// pause for a random amount of time between 50 and 350
-		// milliseconds.
-		//ms := 50 + (rand.Int63() % 350)
-		//time.Sleep(time.Duration(ms) * time.Millisecond)
 		time.Sleep(time.Duration(50) * time.Millisecond)
 	}
 }
 
-func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int) (bool, int) {
-	args := &RequestVoteArgs{
-		// term is passed as parameter so the peer votes with an immutable term atomically read when the peer was a candidate. if the term is obsolete it will be fenced.
-		// cause: if term is read from the state non atomically (e.g. here), it could be already have been incremented by RPCs and the candidate already fallen back to follower.
-		//        so a peer as a candidate decided to collect votes, but when it does, it collects them as a follower with a newer term. which isn't correct.
-		Term:        currentTerm,
-		CandidateId: rf.me,
-		// 3B
-	}
+func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int) (ok bool, higherTermSeen bool, higherTerm int, votes int) {
 	resultCh := make(chan struct {
 		ok    bool
 		id    int
@@ -204,10 +186,11 @@ func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int) (bool
 			continue
 		}
 		go func() {
-			//DPrintf("Raft instance %d requests vote from instance %d", rf.me, i)
-			reply := &RequestVoteReply{}
 			start := time.Now()
-			ok := rf.sendRequestVote(i, args, reply)
+			// term is passed as parameter so the peer votes with an immutable term atomically read when the peer was a candidate. if the term is obsolete it will be fenced.
+			// cause: if term is read from the state non atomically (e.g. here), it could be already have been incremented by RPCs and the candidate already fallen back to follower.
+			//        so a peer as a candidate decided to collect votes, but when it does, it collects them as a follower with a newer term. which isn't correct.
+			ok, reply := rf.requestVote(i, currentTerm, rf.me)
 			DPrintf("Raft instance %d received response for RequestVote from instance %d: ok=%v voteGranted=%v. elapsed=%d", rf.me, i, ok, reply.VoteGranted, time.Since(start).Milliseconds())
 			resultCh <- struct {
 				ok    bool
@@ -217,44 +200,54 @@ func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int) (bool
 		}()
 	}
 
-	votes := 1 // count me as +1 vote
+	votes = 1 // count me as +1 vote
 	waitForCount := len(rf.peers) - 1
 	waited := 0
 	for {
 		select {
 		case <-time.After(time.Duration(electionTimeoutMs) * time.Millisecond):
 			DPrintf("Raft instance %d hasn't election timeout of %d ms elapsed. Breaking election", rf.me, electionTimeoutMs)
-			return false, votes
+			return false, false, noneTerm, votes
 		case result := <-resultCh:
-			//DPrintf("Raft instance %d retrieved response for RequestVote from instance %d from the channel", rf.me, result.id)
 			if result.ok {
 				// Candidate: if reply.Term > currentTerm: transition to follower and break election:
 				// "If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)"
-				higherTermSeen := false
-				rf.mu.Lock()
-				if rf.increaseTerm(result.reply.Term) {
-					higherTermSeen = true
-					DPrintf("Raft instance %d detected higher term %d while election. Converting to follower", rf.me, result.reply.Term)
+				if result.reply.Term > currentTerm {
+					return false, true, result.reply.Term, votes
 				}
-				rf.mu.Unlock()
-				if higherTermSeen {
-					return false, votes // not a candidate anymore
-				}
-
 				if result.reply.VoteGranted {
 					votes++
 					if votes >= rf.majority {
-						return true, votes
+						return true, false, noneTerm, votes
 					}
 				}
 			}
 			waited++
 			if waited >= waitForCount {
 				DPrintf("Raft instance %d waited for all voters, but got no succesful quorum with (%d) votes", rf.me, votes)
-				return false, votes
+				return false, false, noneTerm, votes
 			}
 		}
 	}
+}
+
+func (rf *Raft) transitionToCandidate() (newTerm int, newElectionTimeoutMs int) {
+	rf.transitionPeerState(Candidate) // Follower and Candidate can become a candidate. Leader cannot and will panic: something went really wrong.
+	electionTimeoutMs := rf.resetElectionTimeout()
+	rf.currentTerm++
+	rf.votedFor = rf.me
+	return rf.currentTerm, electionTimeoutMs
+}
+
+func (rf *Raft) transitionToLeader(termWhenPeerWasCandidate int) (ok bool) {
+	// TODO transision success only if enough votes received proveiously whic stored in a field
+	//   mb not needed: the method isn't supposed to be public, no need to store votes as field.
+	//   but mb needed: the Raft class is state of the Raft consensus. And the outer cycle is a client to the Raft class.
+	if (rf.peerState == Candidate) && (rf.currentTerm == termWhenPeerWasCandidate) { // could have been changed to Follower by RPCs
+		rf.transitionPeerState(Leader)
+		return true
+	}
+	return false
 }
 
 func (rf *Raft) transitionPeerState(newState PeerState) {
@@ -283,6 +276,10 @@ func (rf *Raft) transitionPeerState(newState PeerState) {
 	rf.peerState = newState
 }
 
+func (rf *Raft) needElection() bool {
+	return (rf.peerState != Leader) && rf.electionTimeoutElapsed()
+}
+
 func (rf *Raft) resetElectionTimeout() int {
 	newTimeoutMs := 500 + (int(rand.Int31()) % 500)
 	rf.electionTimeoutMs = newTimeoutMs
@@ -298,7 +295,7 @@ func (rf *Raft) electionTimeoutElapsed() bool {
 	return elapsed.Milliseconds() >= int64(rf.electionTimeoutMs)
 }
 
-func (rf *Raft) handleHearbeat(term int) bool {
+func (rf *Raft) handleHearbeatReceived(term int) bool {
 	if term >= rf.currentTerm {
 		rf.resetHeartbeatTimeout() // reset only after term check: ignore heartbeats from zombie leaders
 		if rf.increaseTerm(term) {
@@ -319,8 +316,7 @@ func (rf *Raft) voteForCandidate(candidateId, candidateTerm int) bool {
 	//    least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
 	// TODO  check log watermarks (3B)
 	if (rf.currentTerm <= candidateTerm) && ((rf.votedFor == votedForNone) || (rf.votedFor == candidateId)) {
-		// TODO persistence (3C)
-		rf.votedFor = candidateId
+		rf.votedFor = candidateId // TODO persistence (3C)
 		// Granging vote to candidate = heartbeat:
 		// "If election timeout elapses without receiving AppendEntries RPC from current leader or granting vote to candidate: convert to candidate"
 		rf.resetHeartbeatTimeout()
@@ -338,6 +334,27 @@ func (rf *Raft) increaseTerm(newTerm int) bool {
 		return true
 	}
 	return false
+}
+
+func (rf *Raft) sendHeartbeat(serverid int, term int, leaderId int) (bool, *AppendEntriesReply) {
+	args := &AppendEntriesArgs{
+		Term:     term,
+		LeaderId: leaderId,
+	}
+	reply := &AppendEntriesReply{}
+	ok := rf.sendAppendEntries(serverid, args, reply)
+	return ok, reply
+}
+
+func (rf *Raft) requestVote(serverid int, term int, candidateId int) (bool, *RequestVoteReply) {
+	args := &RequestVoteArgs{
+		Term:        term,
+		CandidateId: candidateId,
+		// 3B
+	}
+	reply := &RequestVoteReply{}
+	ok := rf.sendRequestVote(serverid, args, reply)
+	return ok, reply
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -398,7 +415,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		panic(fmt.Sprintf("received AppendEntries from self id=%d", rf.me))
 	}
 	rf.mu.Lock()
-	reply.Success = rf.handleHearbeat(args.Term) // 3B: log == nil: heartbeat
+	reply.Success = rf.handleHearbeatReceived(args.Term) // 3B: log == nil: heartbeat
 	reply.Term = rf.currentTerm
 	rf.mu.Unlock()
 }
