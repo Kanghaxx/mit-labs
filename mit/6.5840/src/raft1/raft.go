@@ -33,6 +33,12 @@ const (
 	noneTerm     = -1
 )
 
+const (
+	heartbeatsPeriodicityMs    = 150
+	electionCheckPeriodicityMs = 50
+	electionTimeoutMs          = 500
+)
+
 // A Go object implementing a single Raft peer.
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
@@ -102,11 +108,11 @@ func (rf *Raft) startHeartbeats() {
 				currentTerm, isLeader := rf.GetState() // locking inside
 				if isLeader {
 					// Send heartbits
-					start := time.Now()
 					// Heartbeats are sent via fire and forget. In-flight requests could stack and grow indefinitely.
 					// But if sent sequentially, tests fail on bad network due to strict timing: a single lost response leads to heatrbeats pause for a peer until it times out.
 					// Follow-up: throttle in-flight requests (semaphore etc).
 					go func() {
+						start := time.Now()
 						ok, reply := rf.sendHeartbeat(serverid, currentTerm, rf.me)
 						DPrintf("Raft instance %d sent heartbeat to instance %d. ok=%v elapsed=%d", rf.me, i, ok, time.Since(start).Milliseconds())
 						resultCh <- struct {
@@ -116,7 +122,7 @@ func (rf *Raft) startHeartbeats() {
 						}{ok, serverid, reply}
 					}()
 				}
-				time.Sleep(time.Duration(150) * time.Millisecond)
+				time.Sleep(time.Duration(heartbeatsPeriodicityMs) * time.Millisecond)
 			}
 		}(i)
 	}
@@ -137,9 +143,8 @@ func (rf *Raft) startElection() {
 	for rf.killed() == false {
 		// Your code here (3A)
 		// Check if a leader election should be started.
-		needElection := false
 		rf.mu.Lock()
-		needElection = rf.needElection()
+		needElection := rf.needElection()
 		rf.mu.Unlock()
 		if needElection {
 			// Start election
@@ -171,7 +176,7 @@ func (rf *Raft) startElection() {
 			}
 		}
 
-		time.Sleep(time.Duration(50) * time.Millisecond)
+		time.Sleep(time.Duration(electionCheckPeriodicityMs) * time.Millisecond)
 	}
 }
 
@@ -281,7 +286,7 @@ func (rf *Raft) needElection() bool {
 }
 
 func (rf *Raft) resetElectionTimeout() int {
-	newTimeoutMs := 500 + (int(rand.Int31()) % 500)
+	newTimeoutMs := electionTimeoutMs + (int(rand.Int31()) % electionTimeoutMs)
 	rf.electionTimeoutMs = newTimeoutMs
 	return newTimeoutMs
 }
