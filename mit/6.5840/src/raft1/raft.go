@@ -131,9 +131,7 @@ func (rf *Raft) startLogApply() {
 			rf.applyCh <- raftapi.ApplyMsg{
 				CommandValid: true,
 				Command:      rf.log[rf.lastApplied].command,
-				CommandIndex: rf.lastApplied + 1, // Fatal: one(100) failed to reach agreement
-				//CommandIndex: rf.lastApplied, // got index 0 but expected 1
-
+				CommandIndex: rf.lastApplied + 1, // pretend 1-indexed. If not, tests fail with "one(100) failed to reach agreement" or "got index 0 but expected 1": 1 is hardcoded in tests
 			}
 			DPrintf("Raft instance %d has applied command at log index=%d", rf.me, rf.lastApplied)
 		}
@@ -692,9 +690,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader = rf.peerState == Leader
 	if isLeader {
 		rf.log = append(rf.log, LogEntry{command, term})
-		index = len(rf.log) - 1
-		//rf.nextIndex[rf.me] = len(rf.log)      // ?
-		//rf.matchIndex[rf.me] = len(rf.log) - 1 // ?
+		index = len(rf.log) // pretend 1-indexed. If not, tests fail with "one(100) failed to reach agreement" or "got index 0 but expected 1": 1 is hardcoded in tests
+		DPrintf("Raft instance %d (Leader) appended log entry to local log at index=%d", rf.me, index)
 	}
 	rf.mu.Unlock()
 
