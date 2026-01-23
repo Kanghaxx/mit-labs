@@ -153,7 +153,6 @@ func TestBasicAgree3B(t *testing.T) {
 	}
 }
 
-/*
 // check, based on counting bytes of RPCs, that
 // each command is sent to each peer just once.
 func TestRPCBytes3B(t *testing.T) {
@@ -201,6 +200,7 @@ func TestFollowerFailure3B(t *testing.T) {
 	// disconnect one follower from the network.
 	leader1 := ts.checkOneLeader()
 	ts.g.DisconnectAll((leader1 + 1) % servers)
+	fmt.Printf("Test (3B): one instance disconnected: %d \n", (leader1+1)%servers)
 	tester.AnnotateConnection(ts.g.GetConnected())
 
 	// the leader and remaining follower should be
@@ -228,8 +228,10 @@ func TestFollowerFailure3B(t *testing.T) {
 
 	// check that command 104 did not commit.
 	ts.checkNoAgreement(index)
+
 }
 
+/*
 // test just failure of leaders.
 func TestLeaderFailure3B(t *testing.T) {
 	servers := 3

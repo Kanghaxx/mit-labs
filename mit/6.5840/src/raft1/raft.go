@@ -141,7 +141,6 @@ func (rf *Raft) startLogApply() {
 }
 
 func (rf *Raft) startLogCommit() {
-
 	for i := range rf.peers {
 		if i == rf.me {
 			continue
@@ -185,6 +184,10 @@ func (rf *Raft) startLogCommit() {
 						}
 						reply := &AppendEntriesReply{}
 						DPrintf("Raft isntance %d (Leader) sends AppendEntries request for %d entries, PrevLogIndex=%d count=%d", rf.me, len(newEntries), prevLogIndex, len(newEntries))
+						// TODO mb send requeses in parallel to tolerate crashed servers
+						// Need workarounds to keep watermark consistend:
+						// 1. if success=false, decrease nextIndex only if it hasn't changed. Compare-and-set based on prevLogIndex and prevLogTerm using request-response.
+						// 2. if success=true, only increase watermarks, never decrease.
 						ok := rf.sendAppendEntries(serverid, args, reply)
 						if ok {
 							rf.mu.Lock()
@@ -202,20 +205,14 @@ func (rf *Raft) startLogCommit() {
 
 									// If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm:
 									// set commitIndex = N (§5.3, §5.4)
-
 									matchIndexSorted := make([]int, len(rf.matchIndex))
 									copy(matchIndexSorted, rf.matchIndex)
 									sort.Ints(matchIndexSorted)
-									commitIndex := matchIndexSorted[rf.majority-1]
+									commitIndex := matchIndexSorted[rf.majority] // don't take into accout the leader: it's matchIndex isn't increased by design
 									if (commitIndex >= 0) && (commitIndex > rf.commitIndex) && (rf.log[commitIndex].term == rf.currentTerm) {
 										DPrintf("Raft instance %d (Leader) increasing commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
 										rf.commitIndex = commitIndex
 									}
-
-									// ! TODO apply to state machine! must be applied on all peers: leader and followers.
-									// after increasing commitIndex
-									// probably on separate loop thread. Too complex to do here
-
 								} else {
 									// if not success, decrease nextIndex
 									if rf.nextIndex[serverid] > 0 {
