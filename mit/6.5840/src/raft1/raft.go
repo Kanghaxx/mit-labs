@@ -372,9 +372,14 @@ func (rf *Raft) startElection() {
 			DPrintf("Raft instance %d election timeout elapsed, starting election", rf.me)
 			rf.mu.Lock()
 			currentTerm, electionTimeoutMs := rf.transitionToCandidate()
+			lastLogIndex := len(rf.log) - 1
+			lastLogTerm := -1
+			if lastLogIndex >= 0 {
+				lastLogTerm = rf.log[lastLogIndex].term
+			}
 			rf.mu.Unlock()
 
-			success, higherTermSeen, higherTerm, votes := rf.collectQuorumVotes(currentTerm, electionTimeoutMs)
+			success, higherTermSeen, higherTerm, votes := rf.collectQuorumVotes(currentTerm, electionTimeoutMs, lastLogIndex, lastLogTerm)
 			if success {
 				DPrintf("Raft instance %d received majority votes (%d), becoming leader", rf.me, votes)
 				rf.mu.Lock()
@@ -401,7 +406,7 @@ func (rf *Raft) startElection() {
 	}
 }
 
-func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int) (ok bool, higherTermSeen bool, higherTerm int, votes int) {
+func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int, lastLogIndex int, lastLogTerm int) (ok bool, higherTermSeen bool, higherTerm int, votes int) {
 	resultCh := make(chan struct {
 		ok    bool
 		id    int
@@ -416,7 +421,7 @@ func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int) (ok b
 			// term is passed as parameter so the peer votes with an immutable term atomically read when the peer was a candidate. if the term is obsolete it will be fenced.
 			// cause: if term is read from the state non atomically (e.g. here), it could be already have been incremented by RPCs and the candidate already fallen back to follower.
 			//        so a peer as a candidate decided to collect votes, but when it does, it collects them as a follower with a newer term. which isn't correct.
-			ok, reply := rf.requestVote(i, currentTerm, rf.me)
+			ok, reply := rf.requestVote(i, currentTerm, rf.me, lastLogIndex, lastLogTerm)
 			DPrintf("Raft instance %d received response for RequestVote from instance %d: ok=%v voteGranted=%v. elapsed=%d", rf.me, i, ok, reply.VoteGranted, time.Since(start).Milliseconds())
 			resultCh <- struct {
 				ok    bool
@@ -521,23 +526,46 @@ func (rf *Raft) electionTimeoutElapsed() bool {
 	return elapsed.Milliseconds() >= int64(rf.electionTimeoutMs)
 }
 
-func (rf *Raft) voteForCandidate(candidateId, candidateTerm int) bool {
+func (rf *Raft) voteForCandidate(candidateId, candidateTerm int, candidateLastLogIndex int, candidateLastLogTerm int) bool {
 	// If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)
 	if rf.increaseTerm(candidateTerm) {
 		DPrintf("Raft instance %d detected higher term %d in RequestVote request. Converting to follower", rf.me, candidateTerm)
 	}
-	// 1. Reply false if args.term < currentTerm (§5.1)
-	// 2. If votedFor is null or candidateId, and candidate’s log is at
-	//    least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
-	// TODO  check log watermarks (3B)
-	if (rf.currentTerm <= candidateTerm) && ((rf.votedFor == votedForNone) || (rf.votedFor == candidateId)) {
+
+	// Reply false if args.term < currentTerm (§5.1)
+	if candidateTerm < rf.currentTerm {
+		return false
+	}
+
+	// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
+	// Raft determines which of two logs is more up-to-date by comparing the index and term of the last entries in the logs.
+	// If the logs have last entries with different terms, then the log with the later term is more up-to-date.
+	// If the logs end with the same term, then whichever log is longer is more up-to-date.
+	//
+	// candidate.term >= -1 (-1 means empty log, but first term in the log is 1: initially was 0, but transition to candidate increases to 1)
+	// candidate.index >= -1 (-1 means empty log, first index in the log is 0)
+	// peer.term >= -1
+	// peer.index >= -1 (empty log)
+	// grant vote:
+	// candidate.term > peer.term: candidate has newer log. grant vote.
+	// candidate.term == peer.term: check log index. if candidate.index >= peer.index: candidate has newer or same log. grant vote.
+	// otherwise: false.
+	lastLogIndex := len(rf.log) - 1
+	lastLogTerm := -1
+	if lastLogIndex >= 0 {
+		lastLogTerm = rf.log[lastLogIndex].term
+	}
+
+	candidateLogGreaterOrEquals := (candidateLastLogTerm > lastLogTerm) || ((candidateLastLogTerm == lastLogTerm) && (candidateLastLogIndex >= lastLogIndex))
+	if ((rf.votedFor == votedForNone) || (rf.votedFor == candidateId)) && candidateLogGreaterOrEquals {
 		rf.votedFor = candidateId // TODO persistence (3C)
 		// Granging vote to candidate = heartbeat:
 		// "If election timeout elapses without receiving AppendEntries RPC from current leader or granting vote to candidate: convert to candidate"
 		rf.resetHeartbeatTimeout()
 		return true
+	} else {
+		return false
 	}
-	return false
 }
 
 func (rf *Raft) increaseTerm(newTerm int) bool {
@@ -551,11 +579,13 @@ func (rf *Raft) increaseTerm(newTerm int) bool {
 	return false
 }
 
-func (rf *Raft) requestVote(serverid int, term int, candidateId int) (bool, *RequestVoteReply) {
+func (rf *Raft) requestVote(serverid int, term int, candidateId int, lastLogIndex int, lastLogTerm int) (bool, *RequestVoteReply) {
 	args := &RequestVoteArgs{
 		Term:        term,
 		CandidateId: candidateId,
 		// 3B
+		LastLogIndex: lastLogIndex,
+		LastLogTerm:  lastLogTerm,
 	}
 	reply := &RequestVoteReply{}
 	ok := rf.sendRequestVote(serverid, args, reply)
@@ -607,7 +637,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		panic(fmt.Sprintf("received RequestVote from self id=%d", rf.me))
 	}
 	rf.mu.Lock()
-	reply.VoteGranted = rf.voteForCandidate(args.CandidateId, args.Term)
+	reply.VoteGranted = rf.voteForCandidate(args.CandidateId, args.Term, args.LastLogIndex, args.LastLogTerm)
 	reply.Term = rf.currentTerm
 	DPrintf("Raft instance %d processed RequestVote from id=%d. currentTerm=%d votedFor=%d. Result: voteGranted=%v", rf.me, args.CandidateId, rf.currentTerm, rf.votedFor, reply.VoteGranted)
 	rf.mu.Unlock()
@@ -629,8 +659,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 // field names must start with capital letters!
 type RequestVoteArgs struct {
 	// Your data here (3A, 3B).
-	Term        int
-	CandidateId int
+	Term         int
+	CandidateId  int
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 // example RequestVote RPC reply structure.

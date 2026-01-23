@@ -231,7 +231,6 @@ func TestFollowerFailure3B(t *testing.T) {
 
 }
 
-/*
 // test just failure of leaders.
 func TestLeaderFailure3B(t *testing.T) {
 	servers := 3
@@ -270,6 +269,7 @@ func TestLeaderFailure3B(t *testing.T) {
 	ts.checkNoAgreement(4)
 }
 
+/*
 // test that a follower participates after
 // disconnect and re-connect.
 func TestFailAgree3B(t *testing.T) {
