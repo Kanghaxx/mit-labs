@@ -269,7 +269,6 @@ func TestLeaderFailure3B(t *testing.T) {
 	ts.checkNoAgreement(4)
 }
 
-/*
 // test that a follower participates after
 // disconnect and re-connect.
 func TestFailAgree3B(t *testing.T) {
@@ -762,7 +761,6 @@ loop:
 	tester.AnnotateCheckerSuccess(
 		"used a reasonable number of RPCs in idle", details)
 }
-*/
 
 func TestPersist13C(t *testing.T) {
 	servers := 3
