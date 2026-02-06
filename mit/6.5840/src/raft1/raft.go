@@ -45,6 +45,14 @@ type LogEntry struct {
 	term    int
 }
 
+type appendEtriesResult struct {
+	ok           bool
+	id           int
+	nextIndex    int
+	lastLogIndex int
+	reply        *AppendEntriesReply
+}
+
 // A Go object implementing a single Raft peer.
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
@@ -64,12 +72,13 @@ type Raft struct {
 	majority                int
 	lastHeartbeatReceivedAt time.Time
 	// 3B
-	log         []LogEntry
-	commitIndex int
-	lastApplied int
-	nextIndex   []int
-	matchIndex  []int
-	applyCh     chan raftapi.ApplyMsg
+	log                   []LogEntry
+	commitIndex           int
+	lastApplied           int
+	nextIndex             []int
+	matchIndex            []int
+	applyCh               chan raftapi.ApplyMsg
+	appendEntriesResultCh chan appendEtriesResult
 }
 
 // the service or tester wants to create a Raft server. the ports
@@ -107,7 +116,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		rf.matchIndex[i] = -1         // initialized to 0, increases monotonically
 	}
 	rf.applyCh = applyCh
-
+	rf.appendEntriesResultCh = make(chan appendEtriesResult)
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
@@ -140,14 +149,115 @@ func (rf *Raft) startLogApply() {
 	}
 }
 
+func (rf *Raft) sendAppendEntriesToPeers() {
+	for serverid := range rf.peers {
+		if serverid == rf.me {
+			continue
+		}
+		if rf.killed() == true {
+			return
+		}
+		rf.mu.Lock()
+		isLeader := rf.peerState == Leader
+		var args *AppendEntriesArgs
+		nextIndex := -1
+		lastLogIndex := len(rf.log) - 1
+		if isLeader {
+			nextIndex = rf.nextIndex[serverid]
+			prevLogIndex := nextIndex - 1 // prev index and term for the very first entry = -1
+			prevLogTerm := noneTerm
+			if prevLogIndex >= 0 {
+				prevLogTerm = rf.log[prevLogIndex].term
+			}
+			// "If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex"
+			var newEntries []LogEntryApiModel = nil
+			if lastLogIndex >= nextIndex {
+				// copy entries to send
+				DPrintf("Raft isntance %d (Leader) has lastLogIndex=%d and nextIndex=%d. Copying entries from log", rf.me, lastLogIndex, nextIndex)
+				// TODO new leader can try to send all log after failover. Mb add upper limit
+				newEntriesSlice := rf.log[nextIndex : lastLogIndex+1]
+				newEntries = make([]LogEntryApiModel, len(newEntriesSlice))
+				for i, val := range newEntriesSlice {
+					newEntries[i] = LogEntryApiModel{Term: val.term, Command: val.command}
+				}
+			}
+
+			args = &AppendEntriesArgs{
+				Term:         rf.currentTerm,
+				LeaderId:     rf.me,
+				PrevLogIndex: prevLogIndex,
+				PrevLogTerm:  prevLogTerm,
+				Entries:      newEntries,
+				LeaderCommit: rf.commitIndex,
+			}
+		}
+		rf.mu.Unlock()
+
+		if isLeader {
+			//DPrintf("Raft isntance %d (Leader) sends AppendEntries request for %d entries, PrevLogIndex=%d LeaderCommit=%d count=%d", rf.me, len(newEntries), prevLogIndex, leaderCommit, len(newEntries))
+			// Send requeses in parallel to tolerate crashed servers
+			go func(nextIndex int, lastLogIndex int) {
+				reply := &AppendEntriesReply{}
+				ok := rf.sendAppendEntries(serverid, args, reply)
+				rf.appendEntriesResultCh <- appendEtriesResult{ok, serverid, nextIndex, lastLogIndex, reply}
+			}(nextIndex, lastLogIndex)
+		}
+	}
+}
+
 func (rf *Raft) startAppendingEntries() {
-	resultCh := make(chan struct {
-		ok           bool
-		id           int
-		nextIndex    int
-		lastLogIndex int
-		reply        *AppendEntriesReply
-	})
+	go func() {
+		for rf.killed() == false {
+			rf.sendAppendEntriesToPeers()
+			time.Sleep(time.Duration(150) * time.Millisecond)
+		}
+	}()
+
+	// handle responses
+	for result := range rf.appendEntriesResultCh {
+		if result.ok {
+			rf.mu.Lock()
+			if rf.increaseTerm(result.reply.Term) {
+				DPrintf("Raft instance %d (Leader) detected higher term %d on AppendEntries response from %d. Converting to follower", rf.me, result.reply.Term, result.id)
+			} else {
+				// if nextIndex has changed, don't touch watermarks: concurrent request won
+				if result.nextIndex == rf.nextIndex[result.id] {
+					// TODO:
+					// 1. if success=false, decrease nextIndex only if it hasn't changed. Compare-and-set based on prevLogIndex and prevLogTerm using request-response.
+					// 2. if success=true, only increase watermarks, never decrease.
+					if result.reply.Success {
+						// increase follower watermarks
+						DPrintf("Raft instance %d (Leader) increasing nextIndex[%d] from %d to %d", rf.me, result.id, rf.nextIndex[result.id], result.lastLogIndex+1)
+						rf.nextIndex[result.id] = result.lastLogIndex + 1
+						rf.matchIndex[result.id] = result.lastLogIndex
+						// "If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm:""
+						// "set commitIndex = N (§5.3, §5.4)""
+						matchIndexSorted := make([]int, len(rf.matchIndex))
+						copy(matchIndexSorted, rf.matchIndex)
+						sort.Ints(matchIndexSorted)
+						commitIndex := matchIndexSorted[rf.majority] // don't take into accout the leader: it's matchIndex isn't increased by design
+						if (commitIndex >= 0) && (commitIndex > rf.commitIndex) && (rf.log[commitIndex].term == rf.currentTerm) {
+							DPrintf("Raft instance %d (Leader) increasing commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
+							rf.commitIndex = commitIndex
+						}
+					} else {
+						// if not success, decrease nextIndex
+						if rf.nextIndex[result.id] > 0 {
+							DPrintf("Raft instance %d (Leader) decreasing nextIndex[%d] to %d", rf.me, result.id, rf.nextIndex[result.id]-1)
+							rf.nextIndex[result.id] = rf.nextIndex[result.id] - 1
+						}
+					}
+				} else {
+					DPrintf("Raft instance %d (Leader) AppendEntries response fenced out: result.nextIndex=%d but leader's nextIndex[%d]=%d", rf.me, result.nextIndex, result.id, rf.nextIndex[result.id])
+				}
+			}
+			rf.mu.Unlock()
+		}
+	}
+}
+
+func (rf *Raft) startAppendingEntries_old() {
+
 	for i := range rf.peers {
 		if i == rf.me {
 			continue
@@ -156,20 +266,18 @@ func (rf *Raft) startAppendingEntries() {
 			for rf.killed() == false {
 				rf.mu.Lock()
 				isLeader := rf.peerState == Leader
-				currentTerm := rf.currentTerm
-				leaderCommit := rf.commitIndex
-				lastLogIndex := len(rf.log) - 1
+				var args *AppendEntriesArgs
 				nextIndex := -1
-				prevLogIndex := -1
-				prevLogTerm := noneTerm
-				var newEntries []LogEntryApiModel = nil
+				lastLogIndex := len(rf.log) - 1
 				if isLeader {
 					nextIndex = rf.nextIndex[serverid]
-					prevLogIndex = nextIndex - 1 // prev index and term for the very first entry = -1
+					prevLogIndex := nextIndex - 1 // prev index and term for the very first entry = -1
+					prevLogTerm := noneTerm
 					if prevLogIndex >= 0 {
 						prevLogTerm = rf.log[prevLogIndex].term
 					}
 					// "If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex"
+					var newEntries []LogEntryApiModel = nil
 					if lastLogIndex >= nextIndex {
 						// copy entries to send
 						DPrintf("Raft isntance %d (Leader) has lastLogIndex=%d and nextIndex=%d. Copying entries from log", rf.me, lastLogIndex, nextIndex)
@@ -180,30 +288,25 @@ func (rf *Raft) startAppendingEntries() {
 							newEntries[i] = LogEntryApiModel{Term: val.term, Command: val.command}
 						}
 					}
+
+					args = &AppendEntriesArgs{
+						Term:         rf.currentTerm,
+						LeaderId:     rf.me,
+						PrevLogIndex: prevLogIndex,
+						PrevLogTerm:  prevLogTerm,
+						Entries:      newEntries,
+						LeaderCommit: rf.commitIndex,
+					}
 				}
 				rf.mu.Unlock()
 
 				if isLeader {
-					args := &AppendEntriesArgs{
-						Term:         currentTerm,
-						LeaderId:     rf.me,
-						PrevLogIndex: prevLogIndex,
-						PrevLogTerm:  prevLogTerm,
-						Entries:      newEntries, // nil = heartbeat
-						LeaderCommit: leaderCommit,
-					}
-					DPrintf("Raft isntance %d (Leader) sends AppendEntries request for %d entries, PrevLogIndex=%d LeaderCommit=%d count=%d", rf.me, len(newEntries), prevLogIndex, leaderCommit, len(newEntries))
+					//DPrintf("Raft isntance %d (Leader) sends AppendEntries request for %d entries, PrevLogIndex=%d LeaderCommit=%d count=%d", rf.me, len(newEntries), prevLogIndex, leaderCommit, len(newEntries))
 					// Send requeses in parallel to tolerate crashed servers
 					go func(nextIndex int, lastLogIndex int) {
 						reply := &AppendEntriesReply{}
 						ok := rf.sendAppendEntries(serverid, args, reply)
-						resultCh <- struct {
-							ok           bool
-							id           int
-							nextIndex    int
-							lastLogIndex int
-							reply        *AppendEntriesReply
-						}{ok, serverid, nextIndex, lastLogIndex, reply}
+						rf.appendEntriesResultCh <- appendEtriesResult{ok, serverid, nextIndex, lastLogIndex, reply}
 					}(nextIndex, lastLogIndex)
 				}
 				time.Sleep(time.Duration(150) * time.Millisecond)
@@ -212,7 +315,7 @@ func (rf *Raft) startAppendingEntries() {
 	}
 
 	// handle responses
-	for result := range resultCh {
+	for result := range rf.appendEntriesResultCh {
 		if result.ok {
 			rf.mu.Lock()
 			if rf.increaseTerm(result.reply.Term) {
@@ -410,6 +513,7 @@ func (rf *Raft) startElection() {
 				rf.mu.Lock()
 				if rf.transitionToLeader(currentTerm) {
 					DPrintf("Raft instance %d is now LEADER for term %d", rf.me, rf.currentTerm)
+
 				} else {
 					DPrintf("Raft instance %d transition to leader fail: already fallen back to follower", rf.me)
 				}
