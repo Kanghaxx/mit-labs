@@ -518,6 +518,7 @@ func (rf *Raft) startElection() {
 					DPrintf("Raft instance %d transition to leader fail: already fallen back to follower", rf.me)
 				}
 				rf.mu.Unlock()
+				rf.sendAppendEntriesToPeers() // Send initial heartbeats. Locking and leader check inside
 			} else {
 				if higherTermSeen {
 					rf.mu.Lock()
