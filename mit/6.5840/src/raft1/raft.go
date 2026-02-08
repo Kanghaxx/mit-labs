@@ -122,7 +122,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState())
 
 	go rf.startElection()
-	go rf.startAppendingEntries()
+	go rf.startLogReplicationAndHeartbeats()
 	go rf.startLogApply()
 
 	DPrintf("raft instance %d started", rf.me)
@@ -148,7 +148,7 @@ func (rf *Raft) startLogApply() {
 	}
 }
 
-func (rf *Raft) startAppendingEntries() {
+func (rf *Raft) startLogReplicationAndHeartbeats() {
 	go func() {
 		for rf.killed() == false {
 			rf.sendAppendEntriesToPeers()
@@ -170,20 +170,15 @@ func (rf *Raft) startAppendingEntries() {
 				// 1. if success=false, decrease nextIndex only if it hasn't changed. Compare-and-set based on prevLogIndex and prevLogTerm using request-response.
 				// 2. if success=true, only increase watermarks, never decrease.
 				if result.reply.Success {
-					// increase follower watermarks
+					// if follower successfuly stored entries, increase follower watermarks
 					DPrintf("Raft instance %d (Leader) increasing nextIndex[%d] from %d to %d", rf.me, result.id, rf.nextIndex[result.id], result.lastLogIndex+1)
-					rf.nextIndex[result.id] = result.lastLogIndex + 1
-					rf.matchIndex[result.id] = result.lastLogIndex
-					ok, commitIndex := rf.increaseCommitIndexOnLeader()
+					rf.increaseFollowerWatermarksOnLeader(result.id, result.lastLogIndex)
+					ok, commitIndex := rf.increaseCommitIndexOnLeader() // increase commitIndex if quorum achieved
 					if ok {
 						DPrintf("Raft instance %d (Leader) increased commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
 					}
 				} else {
-					// if not success, decrease nextIndex
-					if rf.nextIndex[result.id] > 0 {
-						DPrintf("Raft instance %d (Leader) decreasing nextIndex[%d] to %d", rf.me, result.id, rf.nextIndex[result.id]-1)
-						rf.nextIndex[result.id] = rf.nextIndex[result.id] - 1
-					}
+					rf.decreaseFollowerWatermarksOnLeader(result.id) // if not success, decrease nextIndex: find index where leader and follower agree on their logs
 				}
 			} else {
 				DPrintf("Raft instance %d (Leader) AppendEntries response fenced out: result.nextIndex=%d but leader's nextIndex[%d]=%d", rf.me, result.nextIndex, result.id, rf.nextIndex[result.id])
@@ -220,7 +215,7 @@ func (rf *Raft) sendAppendEntriesToPeers() {
 				LeaderId:     rf.me,
 				PrevLogIndex: prevLogIndex,
 				PrevLogTerm:  prevLogTerm,
-				Entries:      newEntries,
+				Entries:      newEntries, // nil = heartbeat
 				LeaderCommit: rf.commitIndex,
 			}
 		}
@@ -255,6 +250,18 @@ func (rf *Raft) getNewEntries(serverid int) (nextIndex int, entries []LogEntryAp
 	return nextIndex, newEntries
 }
 
+func (rf *Raft) increaseFollowerWatermarksOnLeader(serverid int, lastLogIndex int) {
+	rf.nextIndex[serverid] = lastLogIndex + 1
+	rf.matchIndex[serverid] = lastLogIndex
+}
+
+func (rf *Raft) decreaseFollowerWatermarksOnLeader(serverid int) {
+	if rf.nextIndex[serverid] > 0 {
+		DPrintf("Raft instance %d (Leader) decreasing nextIndex[%d] to %d", rf.me, serverid, rf.nextIndex[serverid]-1)
+		rf.nextIndex[serverid] = rf.nextIndex[serverid] - 1
+	}
+}
+
 // AppendEntries RPC Handler
 func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogIndex int, prevLogTerm int, newEntries []LogEntryApiModel) bool {
 	// "Reply false if term < currentTerm (§5.1)"
@@ -269,31 +276,8 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 		return false // "Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)"
 	}
 	if len(newEntries) > 0 { // newEntries is empty for heatbeats
-		// "If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)"
-		logIndex := prevLogIndex + 1
-		newEntriesIndex := 0
-		lastLogIndex := len(rf.log) - 1
-		for _, entry := range newEntries {
-			if logIndex > lastLogIndex {
-				break
-			}
-			if entry.Term != rf.log[logIndex].term { // ? can Entries reorder due serialization? it can lead to log reordering
-				rf.log = rf.log[:logIndex]
-				break
-			}
-			logIndex++
-			newEntriesIndex++
-			if newEntriesIndex == len(newEntries) {
-				break
-			}
-		}
-		// "Append any new entries not already in the log"
-		for newEntriesIndex < len(newEntries) {
-			model := newEntries[newEntriesIndex]
-			DPrintf("Raft instance %d (Follower) appending entry to local log with entry term=%d", rf.me, model.Term)
-			rf.log = append(rf.log, LogEntry{command: model.Command, term: model.Term})
-			newEntriesIndex++
-		}
+		newEntriesIndex := rf.deleteConflictingEntriesOnFollower(prevLogIndex, newEntries)
+		rf.appentNewEntries(newEntriesIndex, newEntries)
 		//rf.printLog()
 	}
 
@@ -305,6 +289,38 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 	}
 
 	return true
+}
+
+func (rf *Raft) deleteConflictingEntriesOnFollower(prevLogIndex int, newEntries []LogEntryApiModel) int {
+	// "If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)"
+	newEntriesIndex := 0
+	lastLogIndex := len(rf.log) - 1
+	logIndex := prevLogIndex + 1
+	for _, entry := range newEntries {
+		if logIndex > lastLogIndex {
+			break
+		}
+		if entry.Term != rf.log[logIndex].term { // ? can Entries reorder due serialization? it can lead to log reordering
+			rf.log = rf.log[:logIndex]
+			break
+		}
+		logIndex++
+		newEntriesIndex++
+		if newEntriesIndex == len(newEntries) {
+			break
+		}
+	}
+	return newEntriesIndex
+}
+
+func (rf *Raft) appentNewEntries(newEntriesIndex int, newEntries []LogEntryApiModel) {
+	// "Append any new entries not already in the log"
+	for newEntriesIndex < len(newEntries) {
+		model := newEntries[newEntriesIndex]
+		DPrintf("Raft instance %d (Follower) appending entry to local log with entry term=%d", rf.me, model.Term)
+		rf.log = append(rf.log, LogEntry{command: model.Command, term: model.Term})
+		newEntriesIndex++
+	}
 }
 
 func (rf *Raft) increaseCommitIndexOnLeader() (ok bool, newCommitIndex int) {
