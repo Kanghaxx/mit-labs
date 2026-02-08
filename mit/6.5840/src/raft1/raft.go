@@ -35,7 +35,8 @@ const (
 )
 
 const (
-	heartbeatsPeriodicityMs    = 150
+	appendEntriesPeriodicityMs = 150
+	applyEntriesPeriodicityMs  = 50
 	electionCheckPeriodicityMs = 50
 	electionTimeoutMs          = 500
 )
@@ -120,9 +121,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	// TODO check threading. Excessive goroutines
 	go rf.startElection()
-	//go rf.startHeartbeats()
 	go rf.startAppendingEntries()
 	go rf.startLogApply()
 
@@ -145,7 +144,52 @@ func (rf *Raft) startLogApply() {
 			DPrintf("Raft instance %d has applied command at log index=%d", rf.me, rf.lastApplied)
 		}
 		rf.mu.Unlock()
-		time.Sleep(time.Duration(50) * time.Millisecond)
+		time.Sleep(time.Duration(applyEntriesPeriodicityMs) * time.Millisecond)
+	}
+}
+
+func (rf *Raft) startAppendingEntries() {
+	go func() {
+		for rf.killed() == false {
+			rf.sendAppendEntriesToPeers()
+			time.Sleep(time.Duration(appendEntriesPeriodicityMs) * time.Millisecond)
+		}
+	}()
+
+	// handle AppendEntries responses
+	for result := range rf.appendEntriesResultCh {
+		if !result.ok {
+			continue
+		}
+		rf.mu.Lock()
+		if rf.increaseTerm(result.reply.Term) {
+			DPrintf("Raft instance %d (Leader) detected higher term %d on AppendEntries response from %d. Converting to follower", rf.me, result.reply.Term, result.id)
+		} else {
+			if result.nextIndex == rf.nextIndex[result.id] { // Fencing: if nextIndex has changed, don't touch watermarks (concurrent request won)
+				// TODO: improve fencing
+				// 1. if success=false, decrease nextIndex only if it hasn't changed. Compare-and-set based on prevLogIndex and prevLogTerm using request-response.
+				// 2. if success=true, only increase watermarks, never decrease.
+				if result.reply.Success {
+					// increase follower watermarks
+					DPrintf("Raft instance %d (Leader) increasing nextIndex[%d] from %d to %d", rf.me, result.id, rf.nextIndex[result.id], result.lastLogIndex+1)
+					rf.nextIndex[result.id] = result.lastLogIndex + 1
+					rf.matchIndex[result.id] = result.lastLogIndex
+					ok, commitIndex := rf.increaseCommitIndexOnLeader()
+					if ok {
+						DPrintf("Raft instance %d (Leader) increased commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
+					}
+				} else {
+					// if not success, decrease nextIndex
+					if rf.nextIndex[result.id] > 0 {
+						DPrintf("Raft instance %d (Leader) decreasing nextIndex[%d] to %d", rf.me, result.id, rf.nextIndex[result.id]-1)
+						rf.nextIndex[result.id] = rf.nextIndex[result.id] - 1
+					}
+				}
+			} else {
+				DPrintf("Raft instance %d (Leader) AppendEntries response fenced out: result.nextIndex=%d but leader's nextIndex[%d]=%d", rf.me, result.nextIndex, result.id, rf.nextIndex[result.id])
+			}
+		}
+		rf.mu.Unlock()
 	}
 }
 
@@ -163,25 +207,14 @@ func (rf *Raft) sendAppendEntriesToPeers() {
 		nextIndex := -1
 		lastLogIndex := len(rf.log) - 1
 		if isLeader {
-			nextIndex = rf.nextIndex[serverid]
+			var newEntries []LogEntryApiModel = nil
+			nextIndex, newEntries = rf.getNewEntries(serverid)
+			// "If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex"
 			prevLogIndex := nextIndex - 1 // prev index and term for the very first entry = -1
 			prevLogTerm := noneTerm
 			if prevLogIndex >= 0 {
 				prevLogTerm = rf.log[prevLogIndex].term
 			}
-			// "If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex"
-			var newEntries []LogEntryApiModel = nil
-			if lastLogIndex >= nextIndex {
-				// copy entries to send
-				DPrintf("Raft isntance %d (Leader) has lastLogIndex=%d and nextIndex=%d. Copying entries from log", rf.me, lastLogIndex, nextIndex)
-				// TODO new leader can try to send all log after failover. Mb add upper limit
-				newEntriesSlice := rf.log[nextIndex : lastLogIndex+1]
-				newEntries = make([]LogEntryApiModel, len(newEntriesSlice))
-				for i, val := range newEntriesSlice {
-					newEntries[i] = LogEntryApiModel{Term: val.term, Command: val.command}
-				}
-			}
-
 			args = &AppendEntriesArgs{
 				Term:         rf.currentTerm,
 				LeaderId:     rf.me,
@@ -195,7 +228,7 @@ func (rf *Raft) sendAppendEntriesToPeers() {
 
 		if isLeader {
 			//DPrintf("Raft isntance %d (Leader) sends AppendEntries request for %d entries, PrevLogIndex=%d LeaderCommit=%d count=%d", rf.me, len(newEntries), prevLogIndex, leaderCommit, len(newEntries))
-			// Send requeses in parallel to tolerate crashed servers
+			// Send AppendEntries requests in parallel to tolerate crashed servers
 			go func(nextIndex int, lastLogIndex int) {
 				reply := &AppendEntriesReply{}
 				ok := rf.sendAppendEntries(serverid, args, reply)
@@ -205,221 +238,24 @@ func (rf *Raft) sendAppendEntriesToPeers() {
 	}
 }
 
-func (rf *Raft) startAppendingEntries() {
-	go func() {
-		for rf.killed() == false {
-			rf.sendAppendEntriesToPeers()
-			time.Sleep(time.Duration(150) * time.Millisecond)
-		}
-	}()
-
-	// handle responses
-	for result := range rf.appendEntriesResultCh {
-		if result.ok {
-			rf.mu.Lock()
-			if rf.increaseTerm(result.reply.Term) {
-				DPrintf("Raft instance %d (Leader) detected higher term %d on AppendEntries response from %d. Converting to follower", rf.me, result.reply.Term, result.id)
-			} else {
-				// if nextIndex has changed, don't touch watermarks: concurrent request won
-				if result.nextIndex == rf.nextIndex[result.id] {
-					// TODO:
-					// 1. if success=false, decrease nextIndex only if it hasn't changed. Compare-and-set based on prevLogIndex and prevLogTerm using request-response.
-					// 2. if success=true, only increase watermarks, never decrease.
-					if result.reply.Success {
-						// increase follower watermarks
-						DPrintf("Raft instance %d (Leader) increasing nextIndex[%d] from %d to %d", rf.me, result.id, rf.nextIndex[result.id], result.lastLogIndex+1)
-						rf.nextIndex[result.id] = result.lastLogIndex + 1
-						rf.matchIndex[result.id] = result.lastLogIndex
-						// "If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm:""
-						// "set commitIndex = N (§5.3, §5.4)""
-						matchIndexSorted := make([]int, len(rf.matchIndex))
-						copy(matchIndexSorted, rf.matchIndex)
-						sort.Ints(matchIndexSorted)
-						commitIndex := matchIndexSorted[rf.majority] // don't take into accout the leader: it's matchIndex isn't increased by design
-						if (commitIndex >= 0) && (commitIndex > rf.commitIndex) && (rf.log[commitIndex].term == rf.currentTerm) {
-							DPrintf("Raft instance %d (Leader) increasing commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
-							rf.commitIndex = commitIndex
-						}
-					} else {
-						// if not success, decrease nextIndex
-						if rf.nextIndex[result.id] > 0 {
-							DPrintf("Raft instance %d (Leader) decreasing nextIndex[%d] to %d", rf.me, result.id, rf.nextIndex[result.id]-1)
-							rf.nextIndex[result.id] = rf.nextIndex[result.id] - 1
-						}
-					}
-				} else {
-					DPrintf("Raft instance %d (Leader) AppendEntries response fenced out: result.nextIndex=%d but leader's nextIndex[%d]=%d", rf.me, result.nextIndex, result.id, rf.nextIndex[result.id])
-				}
-			}
-			rf.mu.Unlock()
+func (rf *Raft) getNewEntries(serverid int) (nextIndex int, entries []LogEntryApiModel) {
+	lastLogIndex := len(rf.log) - 1
+	nextIndex = rf.nextIndex[serverid]
+	var newEntries []LogEntryApiModel = nil
+	if lastLogIndex >= nextIndex {
+		// copy entries to send
+		DPrintf("Raft isntance %d (Leader) has lastLogIndex=%d and nextIndex=%d. Copying entries from log", rf.me, lastLogIndex, nextIndex)
+		// TODO new leader can try to send all log after failover. Mb add upper limit
+		newEntriesSlice := rf.log[nextIndex : lastLogIndex+1]
+		newEntries = make([]LogEntryApiModel, len(newEntriesSlice))
+		for i, val := range newEntriesSlice {
+			newEntries[i] = LogEntryApiModel{Term: val.term, Command: val.command}
 		}
 	}
+	return nextIndex, newEntries
 }
 
-func (rf *Raft) startAppendingEntries_old() {
-
-	for i := range rf.peers {
-		if i == rf.me {
-			continue
-		}
-		go func(serverid int) {
-			for rf.killed() == false {
-				rf.mu.Lock()
-				isLeader := rf.peerState == Leader
-				var args *AppendEntriesArgs
-				nextIndex := -1
-				lastLogIndex := len(rf.log) - 1
-				if isLeader {
-					nextIndex = rf.nextIndex[serverid]
-					prevLogIndex := nextIndex - 1 // prev index and term for the very first entry = -1
-					prevLogTerm := noneTerm
-					if prevLogIndex >= 0 {
-						prevLogTerm = rf.log[prevLogIndex].term
-					}
-					// "If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex"
-					var newEntries []LogEntryApiModel = nil
-					if lastLogIndex >= nextIndex {
-						// copy entries to send
-						DPrintf("Raft isntance %d (Leader) has lastLogIndex=%d and nextIndex=%d. Copying entries from log", rf.me, lastLogIndex, nextIndex)
-						// TODO new leader can try to send all log after failover. Mb add upper limit
-						newEntriesSlice := rf.log[nextIndex : lastLogIndex+1]
-						newEntries = make([]LogEntryApiModel, len(newEntriesSlice))
-						for i, val := range newEntriesSlice {
-							newEntries[i] = LogEntryApiModel{Term: val.term, Command: val.command}
-						}
-					}
-
-					args = &AppendEntriesArgs{
-						Term:         rf.currentTerm,
-						LeaderId:     rf.me,
-						PrevLogIndex: prevLogIndex,
-						PrevLogTerm:  prevLogTerm,
-						Entries:      newEntries,
-						LeaderCommit: rf.commitIndex,
-					}
-				}
-				rf.mu.Unlock()
-
-				if isLeader {
-					//DPrintf("Raft isntance %d (Leader) sends AppendEntries request for %d entries, PrevLogIndex=%d LeaderCommit=%d count=%d", rf.me, len(newEntries), prevLogIndex, leaderCommit, len(newEntries))
-					// Send requeses in parallel to tolerate crashed servers
-					go func(nextIndex int, lastLogIndex int) {
-						reply := &AppendEntriesReply{}
-						ok := rf.sendAppendEntries(serverid, args, reply)
-						rf.appendEntriesResultCh <- appendEtriesResult{ok, serverid, nextIndex, lastLogIndex, reply}
-					}(nextIndex, lastLogIndex)
-				}
-				time.Sleep(time.Duration(150) * time.Millisecond)
-			}
-		}(i)
-	}
-
-	// handle responses
-	for result := range rf.appendEntriesResultCh {
-		if result.ok {
-			rf.mu.Lock()
-			if rf.increaseTerm(result.reply.Term) {
-				DPrintf("Raft instance %d (Leader) detected higher term %d on AppendEntries response from %d. Converting to follower", rf.me, result.reply.Term, result.id)
-			} else {
-				// if nextIndex has changed, don't touch watermarks: concurrent request won
-				if result.nextIndex == rf.nextIndex[result.id] {
-					// TODO:
-					// 1. if success=false, decrease nextIndex only if it hasn't changed. Compare-and-set based on prevLogIndex and prevLogTerm using request-response.
-					// 2. if success=true, only increase watermarks, never decrease.
-					if result.reply.Success {
-						// increase follower watermarks
-						DPrintf("Raft instance %d (Leader) increasing nextIndex[%d] from %d to %d", rf.me, result.id, rf.nextIndex[result.id], result.lastLogIndex+1)
-						rf.nextIndex[result.id] = result.lastLogIndex + 1
-						rf.matchIndex[result.id] = result.lastLogIndex
-						// "If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm:""
-						// "set commitIndex = N (§5.3, §5.4)""
-						matchIndexSorted := make([]int, len(rf.matchIndex))
-						copy(matchIndexSorted, rf.matchIndex)
-						sort.Ints(matchIndexSorted)
-						commitIndex := matchIndexSorted[rf.majority] // don't take into accout the leader: it's matchIndex isn't increased by design
-						if (commitIndex >= 0) && (commitIndex > rf.commitIndex) && (rf.log[commitIndex].term == rf.currentTerm) {
-							DPrintf("Raft instance %d (Leader) increasing commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
-							rf.commitIndex = commitIndex
-						}
-					} else {
-						// if not success, decrease nextIndex
-						if rf.nextIndex[result.id] > 0 {
-							DPrintf("Raft instance %d (Leader) decreasing nextIndex[%d] to %d", rf.me, result.id, rf.nextIndex[result.id]-1)
-							rf.nextIndex[result.id] = rf.nextIndex[result.id] - 1
-						}
-					}
-				} else {
-					DPrintf("Raft instance %d (Leader) AppendEntries response fenced out: result.nextIndex=%d but leader's nextIndex[%d]=%d", rf.me, result.nextIndex, result.id, rf.nextIndex[result.id])
-				}
-			}
-			rf.mu.Unlock()
-		}
-	}
-}
-
-func (rf *Raft) sendHeartbeat(serverid int, term int, leaderId int, commitIndex int) (bool, *AppendEntriesReply) {
-	args := &AppendEntriesArgs{
-		Term:         term,
-		LeaderId:     leaderId,
-		PrevLogIndex: -1,
-		PrevLogTerm:  -1,
-		LeaderCommit: commitIndex,
-	}
-	reply := &AppendEntriesReply{}
-	ok := rf.sendAppendEntries(serverid, args, reply)
-	return ok, reply
-}
-
-func (rf *Raft) startHeartbeats() {
-	resultCh := make(chan struct {
-		ok    bool
-		id    int
-		reply *AppendEntriesReply
-	})
-	for i := range rf.peers {
-		if i == rf.me {
-			continue
-		}
-		go func(serverid int) {
-			for rf.killed() == false {
-				rf.mu.Lock()
-				currentTerm := rf.currentTerm
-				isLeader := rf.peerState == Leader
-				commitIndex := rf.commitIndex
-				rf.mu.Unlock()
-				if isLeader {
-					// Send heartbits
-					// Heartbeats are sent via fire and forget. In-flight requests could stack and grow indefinitely.
-					// But if sent sequentially, tests fail on bad network due to strict timing: a single lost response leads to heatrbeats pause for a peer until it times out.
-					// Follow-up: throttle in-flight requests (semaphore etc).
-					go func() {
-						//start := time.Now()
-						ok, reply := rf.sendHeartbeat(serverid, currentTerm, rf.me, commitIndex)
-						//DPrintf("Raft instance %d sent heartbeat to instance %d. ok=%v elapsed=%d", rf.me, i, ok, time.Since(start).Milliseconds())
-						resultCh <- struct {
-							ok    bool
-							id    int
-							reply *AppendEntriesReply
-						}{ok, serverid, reply}
-					}()
-				}
-				time.Sleep(time.Duration(heartbeatsPeriodicityMs) * time.Millisecond)
-			}
-		}(i)
-	}
-
-	// handle heartbeat responses
-	for result := range resultCh {
-		if result.ok {
-			rf.mu.Lock()
-			if rf.increaseTerm(result.reply.Term) {
-				DPrintf("Raft instance %d detected higher term %d on heartbeat response from %d. Converting to follower", rf.me, result.reply.Term, result.id)
-			}
-			rf.mu.Unlock()
-		}
-	}
-}
-
+// AppendEntries RPC Handler
 func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogIndex int, prevLogTerm int, newEntries []LogEntryApiModel) bool {
 	// "Reply false if term < currentTerm (§5.1)"
 	if leaderTerm < rf.currentTerm {
@@ -429,17 +265,14 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 	if rf.increaseTerm(leaderTerm) {
 		DPrintf("Raft instance %d detected higher term %d while handling heartbeat. Converting to follower", rf.me, leaderTerm)
 	}
-	// Consistency Check
-	// "Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)"
-	lastLogIndex := len(rf.log) - 1
-	// if prevLogIndex = -1 then the very first entry at index 0 is being sent, or log is empty. -1 passes Consistency Check
-	if (prevLogIndex >= 0) && ((prevLogIndex > lastLogIndex) || (rf.log[prevLogIndex].term != prevLogTerm)) {
-		return false
+	if !rf.isLogConsistentWithLeader(prevLogIndex, prevLogTerm) {
+		return false // "Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)"
 	}
 	if len(newEntries) > 0 { // newEntries is empty for heatbeats
 		// "If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)"
 		logIndex := prevLogIndex + 1
 		newEntriesIndex := 0
+		lastLogIndex := len(rf.log) - 1
 		for _, entry := range newEntries {
 			if logIndex > lastLogIndex {
 				break
@@ -466,6 +299,36 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 
 	//DPrintf("Raft instance %d (Follower) AppendEntries recevied. leaderCommit=%d", rf.me, leaderCommit)
 
+	oldCommitIndex := rf.commitIndex
+	if rf.increaseCommitIndexOnFollower(leaderCommit, prevLogIndex, len(newEntries)) {
+		DPrintf("Raft instance %d (Follower) commitIndex=%d leaderCommit=%d. Increasing commitIndex from %d to %d", rf.me, rf.commitIndex, leaderCommit, oldCommitIndex, rf.commitIndex)
+	}
+
+	return true
+}
+
+func (rf *Raft) increaseCommitIndexOnLeader() (ok bool, newCommitIndex int) {
+	if rf.peerState != Leader {
+		return false, -1
+	}
+	// "If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm:""
+	// "set commitIndex = N (§5.3, §5.4)""
+	matchIndexSorted := make([]int, len(rf.matchIndex))
+	copy(matchIndexSorted, rf.matchIndex)
+	sort.Ints(matchIndexSorted)
+	commitIndex := matchIndexSorted[rf.majority] // don't take into accout the leader: it's matchIndex isn't increased by design
+	if (commitIndex >= 0) && (commitIndex > rf.commitIndex) && (rf.log[commitIndex].term == rf.currentTerm) {
+		DPrintf("Raft instance %d (Leader) increasing commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
+		rf.commitIndex = commitIndex
+		return true, commitIndex
+	}
+	return false, -1
+}
+
+func (rf *Raft) increaseCommitIndexOnFollower(leaderCommit int, prevLogIndex int, newEntriesCount int) bool {
+	if rf.peerState == Leader {
+		return false
+	}
 	// "If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)"
 	if leaderCommit > rf.commitIndex {
 		// Propagate commitIndex on heartbeat received from leader.
@@ -473,19 +336,26 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 		// to be committed, and it includes that index in future
 		// AppendEntries RPCs (including heartbeats) so that the
 		// other servers eventually find out."
-		oldCommitIndex := rf.commitIndex
-		if len(newEntries) > 0 {
-			lastNewEntryIndex := prevLogIndex + len(newEntries)
+		if newEntriesCount > 0 {
+			lastNewEntryIndex := prevLogIndex + newEntriesCount
 			rf.commitIndex = min(leaderCommit, lastNewEntryIndex)
 		} else {
 			// heartbeat
 			rf.commitIndex = min(leaderCommit, len(rf.log)-1) // ?
 		}
+		return true
+	}
+	return false
+}
 
-		DPrintf("Raft instance %d (Follower) commitIndex=%d leaderCommit=%d. Increasing commitIndex from %d to %d", rf.me, rf.commitIndex, leaderCommit, oldCommitIndex, rf.commitIndex)
+// Consistency Check
+func (rf *Raft) isLogConsistentWithLeader(prevLogIndex int, prevLogTerm int) bool {
+	lastLogIndex := len(rf.log) - 1
+	// if prevLogIndex = -1 then the very first entry at index 0 is being sent, or log is empty. -1 passes Consistency Check
+	if (prevLogIndex >= 0) && ((prevLogIndex > lastLogIndex) || (rf.log[prevLogIndex].term != prevLogTerm)) {
+		return false
 	}
 	return true
-
 }
 
 func (rf *Raft) startElection() {
