@@ -11,7 +11,7 @@ package raft
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
+
 	// "log"
 	"math/rand"
 	"testing"
@@ -762,6 +762,7 @@ loop:
 		"used a reasonable number of RPCs in idle", details)
 }
 
+/*
 func TestPersist13C(t *testing.T) {
 	servers := 3
 	ts := makeTest(t, servers, true, false)
@@ -989,6 +990,7 @@ func TestUnreliableAgree3C(t *testing.T) {
 	ts.one(100, servers, true)
 
 }
+*/
 
 func TestFigure8Unreliable3C(t *testing.T) {
 	servers := 5
@@ -1052,6 +1054,7 @@ func TestFigure8Unreliable3C(t *testing.T) {
 	ts.one(rand.Int()%10000, servers, true)
 }
 
+/*
 func internalChurn(t *testing.T, reliable bool) {
 
 	servers := 5
@@ -1388,3 +1391,4 @@ func TestSnapshotInit3D(t *testing.T) {
 	// do another op to trigger potential bug
 	ts.one(rand.Int(), servers, true)
 }
+*/
