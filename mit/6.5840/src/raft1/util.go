@@ -2,7 +2,7 @@ package raft
 
 import "log"
 
-// false
+// set true to enable verbose Raft debugging
 const Debug = false
 
 func DPrintf(format string, a ...interface{}) {

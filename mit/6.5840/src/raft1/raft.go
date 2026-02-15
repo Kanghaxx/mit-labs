@@ -163,9 +163,9 @@ func (rf *Raft) startLogReplicationAndHeartbeats() {
 		for rf.killed() == false {
 			if rf.sendAppendEntriesToPeers() == 0 {
 				//time.Sleep(time.Duration(appendEntriesPeriodicityMs) * time.Millisecond)
-				time.Sleep(5 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 			} else {
-				time.Sleep(5 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 			}
 		}
 	}()
@@ -179,24 +179,24 @@ func (rf *Raft) startLogReplicationAndHeartbeats() {
 		if rf.increaseTerm(result.reply.Term) {
 			DPrintf("Raft instance %d (Leader) detected higher term %d on AppendEntries response from %d. Converting to follower", rf.me, result.reply.Term, result.id)
 		} else {
-			if result.nextIndex == rf.nextIndex[result.id] { // Fencing: if nextIndex has changed, don't touch watermarks (concurrent request won)
-				// TODO: improve fencing
-				// 1. if success=false, decrease nextIndex only if it hasn't changed. Compare-and-set based on prevLogIndex and prevLogTerm using request-response.
-				// 2. if success=true, only increase watermarks, never decrease.
-				if result.reply.Success {
-					// if follower successfuly stored entries, increase follower watermarks
-					DPrintf("Raft instance %d (Leader) increasing nextIndex[%d] from %d to %d", rf.me, result.id, rf.nextIndex[result.id], result.lastLogIndex+1)
-					rf.increaseFollowerWatermarksOnLeader(result.id, result.lastLogIndex)
-					ok, commitIndex := rf.increaseCommitIndexOnLeader() // increase commitIndex if quorum achieved
-					if ok {
-						DPrintf("Raft instance %d (Leader) increased commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
-					}
-				} else {
-					rf.decreaseFollowerWatermarksOnLeader(result.id, result.reply.XTerm, result.reply.XIndex, result.reply.XLen) // if not success, decrease nextIndex: find index where leader and follower agree on their logs
+			//if result.nextIndex == rf.nextIndex[result.id] { // Fencing: if nextIndex has changed, don't touch watermarks (concurrent request won)
+			// TODO: improve fencing
+			// 1. if success=false, decrease nextIndex only if it hasn't changed. Compare-and-set based on prevLogIndex and prevLogTerm using request-response.
+			// 2. if success=true, only increase watermarks, never decrease.
+			if result.reply.Success {
+				// if follower successfuly stored entries, increase follower watermarks
+				DPrintf("Raft instance %d (Leader) increasing nextIndex[%d] from %d to %d", rf.me, result.id, rf.nextIndex[result.id], result.lastLogIndex+1)
+				rf.increaseFollowerWatermarksOnLeader(result.id, result.lastLogIndex)
+				ok, commitIndex := rf.increaseCommitIndexOnLeader() // increase commitIndex if quorum achieved
+				if ok {
+					DPrintf("Raft instance %d (Leader) increased commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
 				}
 			} else {
-				DPrintf("Raft instance %d (Leader) AppendEntries response fenced out: result.nextIndex=%d but leader's nextIndex[%d]=%d", rf.me, result.nextIndex, result.id, rf.nextIndex[result.id])
+				rf.decreaseFollowerWatermarksOnLeader(result.id, result.reply.XTerm, result.reply.XIndex, result.reply.XLen) // if not success, decrease nextIndex: find index where leader and follower agree on their logs
 			}
+			//} else {
+			//	DPrintf("Raft instance %d (Leader) AppendEntries response fenced out: result.nextIndex=%d but leader's nextIndex[%d]=%d", rf.me, result.nextIndex, result.id, rf.nextIndex[result.id])
+			//}
 		}
 		rf.mu.Unlock()
 	}
@@ -403,7 +403,18 @@ func (rf *Raft) increaseCommitIndexOnLeader() (ok bool, newCommitIndex int) {
 	matchIndexSorted := make([]int, len(rf.matchIndex))
 	copy(matchIndexSorted, rf.matchIndex)
 	sort.Ints(matchIndexSorted)
-	commitIndex := matchIndexSorted[rf.majority] // don't take into accout the leader: it's matchIndex isn't increased by design
+	// TODO
+	// was: leader's matchIndex wasn't taken into account by design - previous lie by an LLM
+	// it was OK: leader's match index wasn't taken into account because leader's log is most actual by design
+	// so matchFixes on leader are pointless
+	// AI:
+	// To find N such that a majority have matchIndex >= N, take the element at
+	// index len(matchIndex)-majority (0-based) after sorting ascending.
+	idx := len(matchIndexSorted) - rf.majority
+	if idx < 0 {
+		idx = 0
+	}
+	commitIndex := matchIndexSorted[idx]
 	if (commitIndex >= 0) && (commitIndex > rf.commitIndex) && (rf.log[commitIndex].Term == rf.currentTerm) {
 		DPrintf("Raft instance %d (Leader) increasing commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
 		rf.commitIndex = commitIndex
@@ -564,6 +575,18 @@ func (rf *Raft) transitionToLeader(termWhenPeerWasCandidate int) (ok bool) {
 	//   but mb needed: the Raft class is state of the Raft consensus. And the outer cycle is a client to the Raft class.
 	if (rf.peerState == Candidate) && (rf.currentTerm == termWhenPeerWasCandidate) { // could have been changed to Follower by RPCs
 		rf.transitionPeerState(Leader)
+		// TODO
+		// AI:
+		// Initialize leader volatile state (nextIndex and matchIndex) for each server.
+		lastIndex := len(rf.log) - 1
+		for i := range rf.peers {
+			rf.nextIndex[i] = lastIndex + 1 // no sense: leader quickly syncs it nextIndex
+			// leader's matchIndex should reflect entries it has
+			rf.matchIndex[i] = -1
+		}
+		if lastIndex >= 0 {
+			rf.matchIndex[rf.me] = lastIndex // no sense: leader's log is by design most actual. TODO probably remove matchIndex checks on leader
+		}
 		return true
 	}
 	return false
@@ -803,9 +826,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
 	isLeader := true
-
 	// Your code here (3B).
 	rf.mu.Lock()
+	DPrintf("Raft instance %d Start called with cmd=%v", rf.me, command)
 	term = rf.currentTerm
 	isLeader = rf.peerState == Leader
 	if isLeader {
@@ -817,12 +840,15 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 
 	// update leader's own watermarks so leader counts itself for replication/commit
+	// TODO why?
 	if isLeader {
-		lastIndex := len(rf.log) - 1
-		rf.matchIndex[rf.me] = lastIndex
-		rf.nextIndex[rf.me] = lastIndex + 1
+		lastLogIndex := len(rf.log) - 1
+		rf.matchIndex[rf.me] = lastLogIndex // before leader matchIndex wasn't taken into account when increasing commitIndex??
+		rf.nextIndex[rf.me] = lastLogIndex + 1
 	}
 	rf.mu.Unlock()
+
+	DPrintf("Raft instance %d Start returning index=%d term=%d isLeader=%v", rf.me, index, term, isLeader)
 
 	return index, term, isLeader
 }
