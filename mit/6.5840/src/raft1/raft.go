@@ -39,10 +39,11 @@ const (
 )
 
 const (
-	appendEntriesPeriodicityMs = 100
-	applyEntriesPeriodicityMs  = 5
-	electionCheckPeriodicityMs = 5
-	electionTimeoutMs          = 250
+	appendEntriesPeriodicityMs = 50
+	applyEntriesPeriodicityMs  = 2
+	electionCheckPeriodicityMs = 10
+	electionTimeoutMs          = 150
+	electionTimeoutRandMs      = 80
 )
 
 type LogEntry struct {
@@ -555,14 +556,14 @@ func (rf *Raft) transitionToLeader(termWhenPeerWasCandidate int) (ok bool) {
 	if (rf.peerState == Candidate) && (rf.currentTerm == termWhenPeerWasCandidate) { // could have been changed to Follower by RPCs
 		rf.transitionPeerState(Leader)
 		// Initialize nextIndex and matchIndex for all peers when becoming leader.
-		lastIndex := len(rf.log) - 1
+		lastLogIndex := len(rf.log) - 1
 		for i := range rf.peers {
-			rf.nextIndex[i] = lastIndex + 1
+			rf.nextIndex[i] = lastLogIndex + 1
 			rf.matchIndex[i] = -1
 		}
 		// leader counts itself as having all its log entries
-		rf.matchIndex[rf.me] = lastIndex
-		rf.nextIndex[rf.me] = lastIndex + 1
+		rf.matchIndex[rf.me] = lastLogIndex
+		rf.nextIndex[rf.me] = lastLogIndex + 1
 		return true
 	}
 	return false
@@ -599,7 +600,7 @@ func (rf *Raft) needElection() bool {
 }
 
 func (rf *Raft) resetElectionTimeout() int {
-	newTimeoutMs := electionTimeoutMs + ((int(rand.Int31())) % electionTimeoutMs) + ((int(rand.Int31())) % electionTimeoutMs) + ((int(rand.Int31())) % electionTimeoutMs)
+	newTimeoutMs := electionTimeoutMs + ((int(rand.Int31())) % electionTimeoutRandMs) + ((int(rand.Int31())) % electionTimeoutRandMs) + ((int(rand.Int31())) % electionTimeoutRandMs)
 	rf.electionTimeoutMs = newTimeoutMs
 	return newTimeoutMs
 }
@@ -813,9 +814,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.persist()        // 3C
 		DPrintf("Raft instance %d (Leader) appended log entry cmd=%v to local log at index=%d", rf.me, command, index)
 		// update leader's own watermarks so leader counts itself for replication/commit
-		lastIndex := len(rf.log) - 1
-		rf.matchIndex[rf.me] = lastIndex
-		rf.nextIndex[rf.me] = lastIndex + 1
+		lastLogIndex := len(rf.log) - 1
+		rf.matchIndex[rf.me] = lastLogIndex
+		rf.nextIndex[rf.me] = lastLogIndex + 1
 		//rf.printLog()
 	}
 	rf.mu.Unlock()
