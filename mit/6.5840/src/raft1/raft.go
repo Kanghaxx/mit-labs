@@ -177,8 +177,7 @@ func (rf *Raft) getAbsLogLen() int {
 }
 
 func (rf *Raft) absToLocal(absIndex int) int {
-	// !! TODO absToLocal could return index <= -1 when there is only a snapshot and the abs index is inside it
-	//
+	// Warning: absToLocal could return index <= -1 when there is only a snapshot and the abs index is inside it
 	// All callers must take this into account
 	// Example:
 	// log (abs) =    0 1 2
@@ -205,35 +204,10 @@ func (rf *Raft) absToLocal(absIndex int) int {
 	//    lastIncludedIndexInSnapshot
 	local := absIndex
 	if rf.lastIncludedIndexInSnapshot >= 0 {
-		local -= rf.lastIncludedIndexInSnapshot - 1
+		local = local - rf.lastIncludedIndexInSnapshot - 1
 	}
+	DPrintf("Raft instance %d absToLocal(): absIndex=%d lastIncludedIndexInSnapshot=%d result=%d", rf.me, absIndex, rf.lastIncludedIndexInSnapshot, local)
 	return local
-}
-
-// the service says it has created a snapshot that has
-// all info up to and including index. this means the
-// service no longer needs the log through (and including)
-// that index. Raft should now trim its log as much as possible.
-func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// 3D
-	rf.mu.Lock()
-	index -= 1 // ! TODO index could be 1-based!
-	if index > rf.lastIncludedIndexInSnapshot {
-		localIndex := rf.absToLocal(index) // hope index is global
-		// 3D: if absToLocal(i) returns index < 0 means that i is inside snapshot, but here it's impossible
-		if localIndex < 0 || localIndex >= len(rf.log) {
-			panic(fmt.Sprintf("Snapshot: snapshot localIndex out of bounds (%d)", localIndex))
-		}
-		rf.lastIncludedTermInSnapshot = rf.log[localIndex].Term
-		rf.lastIncludedIndexInSnapshot = index
-		rf.snapshot = snapshot
-
-		rf.log = rf.log[localIndex+1:] // shrink log
-
-		rf.persist()
-	}
-
-	rf.mu.Unlock()
 }
 
 func (rf *Raft) startLogApply() {
@@ -271,7 +245,7 @@ func (rf *Raft) startLogReplicationAndHeartbeats() {
 		}
 		rf.mu.Lock()
 		if rf.increaseTerm(result.reply.Term) {
-			DPrintf("Raft instance %d (Leader) detected higher term %d on AppendEntries response from %d. Converting to follower", rf.me, result.reply.Term, result.id)
+			//DPrintf("Raft instance %d (Leader) detected higher term %d on AppendEntries response from %d. Converting to follower", rf.me, result.reply.Term, result.id)
 		} else {
 			if result.reply.Success {
 				// if follower successfuly stored entries, increase follower watermarks
@@ -310,8 +284,10 @@ func (rf *Raft) sendAppendEntriesToPeers() int {
 			prevLogTerm := noneTerm
 			prevLogIndex := nextIndex - 1 // prev index and term for the very first entry = -1
 			prevLogIndexLocal := rf.absToLocal(prevLogIndex)
+			DPrintf("Raft instance %d (Leader) prepares appendEntries: prevLogIndex=%d, prevLogIndexLocal=%d newEntries=%v", rf.me, prevLogIndex, prevLogIndexLocal, newEntries)
+			rf.printLog()
 			if prevLogIndexLocal >= 0 {
-				prevLogTerm = rf.log[prevLogIndexLocal].Term // ! out of range
+				prevLogTerm = rf.log[prevLogIndexLocal].Term // ! runtime error: index out of range [1] with length 0
 			} else {
 				// 3D: prevLogIndex could be inside snapshot. Therefore send snapshot's metadata.
 				// If there is no snapshot either, that means leader sends very first entries and -1 will be sent.
@@ -363,7 +339,7 @@ func (rf *Raft) getNewEntries(serverid int) (nextIndex int, entries []LogEntryAp
 	// 3D: nextIndexLocal could be negative (could be inside local snapshot), in this case snapshot must be sent and installed on follower first to increase nextIndex[i]
 	if (nextIndexLocal >= 0) && (nextIndexLocal <= lastLogIndexLocal) {
 		// copy entries to send
-		DPrintf("Raft isntance %d (Leader) has lastLogIndex=%d and nextIndex=%d. Copying entries from log", rf.me, lastLogIndexLocal, nextIndex)
+		//DPrintf("Raft isntance %d (Leader) has lastLogIndex=%d and nextIndex=%d. Copying entries from log", rf.me, lastLogIndexLocal, nextIndex)
 		// TODO new leader can try to send all log after failover. Mb add upper limit
 		newEntriesSlice := rf.log[nextIndexLocal : lastLogIndexLocal+1]
 		newEntries = make([]LogEntryApiModel, len(newEntriesSlice))
@@ -439,7 +415,7 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 	}
 	rf.resetHeartbeatTimeout() // reset only after term check: ignore heartbeats from zombie leaders
 	if rf.increaseTerm(leaderTerm) {
-		DPrintf("Raft instance %d detected higher term %d while handling heartbeat. Converting to follower", rf.me, leaderTerm)
+		//DPrintf("Raft instance %d detected higher term %d while handling heartbeat. Converting to follower", rf.me, leaderTerm)
 	}
 	// "2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)"
 	if !rf.isLogConsistentWithLeader(prevLogIndex, prevLogTerm) {
@@ -687,7 +663,7 @@ func (rf *Raft) startElection() {
 		rf.mu.Unlock()
 		if needElection {
 			// Start election
-			DPrintf("Raft instance %d election timeout elapsed, starting election", rf.me)
+			//DPrintf("Raft instance %d election timeout elapsed, starting election", rf.me)
 			rf.mu.Lock()
 			currentTerm, electionTimeoutMs := rf.transitionToCandidate()
 			lastLogIndex := rf.getAbsLogLen() - 1
@@ -704,13 +680,13 @@ func (rf *Raft) startElection() {
 
 			success, higherTermSeen, higherTerm, votes := rf.collectQuorumVotes(currentTerm, electionTimeoutMs, lastLogIndex, lastLogTerm)
 			if success {
-				DPrintf("Raft instance %d received majority votes (%d), becoming leader", rf.me, votes)
+				//DPrintf("Raft instance %d received majority votes (%d), becoming leader", rf.me, votes)
 				rf.mu.Lock()
 				if rf.transitionToLeader(currentTerm) {
-					DPrintf("Raft instance %d is now LEADER for term %d", rf.me, rf.currentTerm)
+					DPrintf("Raft instance %d is now LEADER for term %d, votes=%d", rf.me, rf.currentTerm, votes)
 
 				} else {
-					DPrintf("Raft instance %d transition to leader fail: already fallen back to follower", rf.me)
+					//DPrintf("Raft instance %d transition to leader fail: already fallen back to follower", rf.me)
 				}
 				rf.mu.Unlock()
 				rf.sendAppendEntriesToPeers() // Send initial heartbeats. Locking and leader check inside
@@ -718,11 +694,11 @@ func (rf *Raft) startElection() {
 				if higherTermSeen {
 					rf.mu.Lock()
 					if rf.increaseTerm(higherTerm) {
-						DPrintf("Raft instance %d detected higher term %d while election. Converting to follower", rf.me, higherTerm)
+						//DPrintf("Raft instance %d detected higher term %d while election. Converting to follower", rf.me, higherTerm)
 					}
 					rf.mu.Unlock()
 				} else {
-					DPrintf("Raft instance %d received only %d votes, staying as candidate", rf.me, votes)
+					//DPrintf("Raft instance %d received only %d votes, staying as candidate", rf.me, votes)
 				}
 			}
 		}
@@ -742,12 +718,12 @@ func (rf *Raft) collectQuorumVotes(currentTerm int, electionTimeoutMs int, lastL
 			continue
 		}
 		go func() {
-			start := time.Now()
+			//start := time.Now()
 			// term is passed as parameter so the peer votes with an immutable term atomically read when the peer was a candidate. if the term is obsolete it will be fenced.
 			// cause: if term is read from the state non atomically (e.g. here), it could be already have been incremented by RPCs and the candidate already fallen back to follower.
 			//        so a peer as a candidate decided to collect votes, but when it does, it collects them as a follower with a newer term. which isn't correct.
 			ok, reply := rf.requestVote(i, currentTerm, rf.me, lastLogIndex, lastLogTerm)
-			DPrintf("Raft instance %d received response for RequestVote from instance %d: ok=%v voteGranted=%v. elapsed=%d", rf.me, i, ok, reply.VoteGranted, time.Since(start).Milliseconds())
+			//DPrintf("Raft instance %d received response for RequestVote from instance %d: ok=%v voteGranted=%v. elapsed=%d", rf.me, i, ok, reply.VoteGranted, time.Since(start).Milliseconds())
 			resultCh <- struct {
 				ok    bool
 				id    int
@@ -860,7 +836,7 @@ func (rf *Raft) electionTimeoutElapsed() bool {
 func (rf *Raft) voteForCandidate(candidateId, candidateTerm int, candidateLastLogIndex int, candidateLastLogTerm int) bool {
 	// If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower (§5.1)
 	if rf.increaseTerm(candidateTerm) {
-		DPrintf("Raft instance %d detected higher term %d in RequestVote request. Converting to follower", rf.me, candidateTerm)
+		//DPrintf("Raft instance %d detected higher term %d in RequestVote request. Converting to follower", rf.me, candidateTerm)
 	}
 
 	// Reply false if args.term < currentTerm (§5.1)
@@ -1074,6 +1050,37 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		go rf.sendAppendEntriesToPeers()
 	}
 	return index, term, isLeader
+}
+
+// the service says it has created a snapshot that has
+// all info up to and including index. this means the
+// service no longer needs the log through (and including)
+// that index. Raft should now trim its log as much as possible.
+func (rf *Raft) Snapshot(index int, snapshot []byte) {
+	// 3D
+	rf.mu.Lock()
+	index -= 1 // ! TODO index could be 1-based!
+	DPrintf("Raft instance %d Snapshot call with index=%d (1-indexed)", rf.me, index)
+	rf.printLog()
+	if index > rf.lastIncludedIndexInSnapshot {
+		localIndex := rf.absToLocal(index) // hope index is global
+		// 3D: if absToLocal(i) returns index < 0 means that i is inside snapshot, but here it's impossible
+		if localIndex < 0 || localIndex >= len(rf.log) {
+			panic(fmt.Sprintf("Snapshot: snapshot localIndex out of bounds (%d)", localIndex))
+		}
+		rf.lastIncludedTermInSnapshot = rf.log[localIndex].Term
+		rf.lastIncludedIndexInSnapshot = index
+		rf.snapshot = snapshot
+
+		rf.log = rf.log[localIndex+1:] // shrink log
+
+		DPrintf("Raft instance %d applied snapshot. lastIncludedIndexInSnapshot=%d (0-indexed), lastIncludedTermInSnapshot=%d", rf.me, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
+		rf.printLog()
+
+		rf.persist()
+	}
+
+	rf.mu.Unlock()
 }
 
 func (rf *Raft) printLog() {
