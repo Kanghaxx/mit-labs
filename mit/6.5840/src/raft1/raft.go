@@ -39,11 +39,16 @@ const (
 )
 
 const (
-	appendEntriesPeriodicityMs = 50
+	appendEntriesPeriodicityMs = 10
 	applyEntriesPeriodicityMs  = 2
-	electionCheckPeriodicityMs = 10
-	electionTimeoutMs          = 150
-	electionTimeoutRandMs      = 80
+	electionCheckPeriodicityMs = 2
+	electionTimeoutMs          = 80
+	electionTimeoutRandMs      = 50
+	// appendEntriesPeriodicityMs = 50
+	// applyEntriesPeriodicityMs  = 2
+	// electionCheckPeriodicityMs = 10
+	// electionTimeoutMs          = 150
+	// electionTimeoutRandMs      = 80
 )
 
 type LogEntry struct {
@@ -85,12 +90,22 @@ type Raft struct {
 	matchIndex            []int
 	applyCh               chan raftapi.ApplyMsg
 	appendEntriesResultCh chan appendEtriesResult
+	// 3D
+	snapshot                    []byte
+	lastIncludedIndexInSnapshot int
+	lastIncludedTermInSnapshot  int
 }
 
 type RaftState struct {
 	CurrentTerm int
 	VotedFor    int
 	Log         []LogEntry
+}
+
+type SnapshotState struct {
+	LastIncludedIndex int
+	LastIncludedTerm  int
+	Snapshot          []byte
 }
 
 // the service or tester wants to create a Raft server. the ports
@@ -125,12 +140,16 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.matchIndex = make([]int, len(rf.peers)) // for each server, index of highest log entry known to be replicated on server
 	// 3C: initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-	for i := range rf.peers {
-		rf.nextIndex[i] = len(rf.log) // initialized to leader last log index + 1
-		rf.matchIndex[i] = -1         // initialized to 0, increases monotonically
-	}
 	rf.applyCh = applyCh
 	rf.appendEntriesResultCh = make(chan appendEtriesResult)
+	// 3D:
+	rf.lastIncludedIndexInSnapshot = -1
+	rf.lastIncludedTermInSnapshot = noneTerm
+	rf.readSnapshot(persister.ReadSnapshot())
+	for i := range rf.peers {
+		rf.nextIndex[i] = rf.getAbsLogLen() // initialized to leader last log index + 1
+		rf.matchIndex[i] = -1               // initialized to 0, increases monotonically
+	}
 
 	go rf.startElection()
 	go rf.startLogReplicationAndHeartbeats()
@@ -141,16 +160,94 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	return rf
 }
 
+func (rf *Raft) getAbsLogLen() int {
+	// Example:
+	// len(abs) =          5  (= local len + lastIncludedIndex + 1)
+	// len(local) =        2
+	// log(trim) =       0,1
+	// log(abs) =  0,1,2,3,4
+	// snapshot =  0,1,2
+	//                 ^
+	//         lastIncludedIndexInSnapshot
+	logLen := len(rf.log)
+	if rf.lastIncludedIndexInSnapshot >= 0 {
+		logLen += rf.lastIncludedIndexInSnapshot + 1
+	}
+	return logLen
+}
+
+func (rf *Raft) absToLocal(absIndex int) int {
+	// !! TODO absToLocal could return index <= -1 when there is only a snapshot and the abs index is inside it
+	//
+	// All callers must take this into account
+	// Example:
+	// log (abs) =    0 1 2
+	// log (local) = nil
+	// snapshot =     0 1 2
+	// Call absToLocal(2) returns 2 - 2 - 1 = -1
+	// Call absToLocal(1) returns 1 - 2 - 1 = -2
+	//
+	// Example:
+	// absIndex =          4
+	// localIndex =        1   (= abs index - lastIncludedIndex - 1)
+	// log(trim) =       0,1
+	// log(abs) =  0,1,2,3,4
+	// snapshot =  0,1,2
+	//                 ^
+	//         lastIncludedIndexInSnapshot
+	// Example:
+	// absIndex =    1
+	// localIdx =    0
+	// log(trim) =   0
+	// log(abs) =  0,1
+	// snapshot =  0,1
+	//             ^
+	//    lastIncludedIndexInSnapshot
+	local := absIndex
+	if rf.lastIncludedIndexInSnapshot >= 0 {
+		local -= rf.lastIncludedIndexInSnapshot - 1
+	}
+	return local
+}
+
+// the service says it has created a snapshot that has
+// all info up to and including index. this means the
+// service no longer needs the log through (and including)
+// that index. Raft should now trim its log as much as possible.
+func (rf *Raft) Snapshot(index int, snapshot []byte) {
+	// 3D
+	rf.mu.Lock()
+	index -= 1 // ! TODO index could be 1-based!
+	if index > rf.lastIncludedIndexInSnapshot {
+		localIndex := rf.absToLocal(index) // hope index is global
+		// 3D: if absToLocal(i) returns index < 0 means that i is inside snapshot, but here it's impossible
+		if localIndex < 0 || localIndex >= len(rf.log) {
+			panic(fmt.Sprintf("Snapshot: snapshot localIndex out of bounds (%d)", localIndex))
+		}
+		rf.lastIncludedTermInSnapshot = rf.log[localIndex].Term
+		rf.lastIncludedIndexInSnapshot = index
+		rf.snapshot = snapshot
+
+		rf.log = rf.log[localIndex+1:] // shrink log
+
+		rf.persist()
+	}
+
+	rf.mu.Unlock()
+}
+
 func (rf *Raft) startLogApply() {
 	for rf.killed() == false {
 		rf.mu.Lock()
-		// "If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)""
+		// "If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)"
 		if rf.commitIndex > rf.lastApplied {
 			rf.lastApplied++
 			rf.applyCh <- raftapi.ApplyMsg{
 				CommandValid: true,
-				Command:      rf.log[rf.lastApplied].Command,
-				CommandIndex: rf.lastApplied + 1, // pretend 1-indexed. If not, tests fail with "one(100) failed to reach agreement" or "got index 0 but expected 1": 1 is hardcoded in tests
+				// absToLocal() could return negative index if lastApplied is inside snapshot, but here lastApplied cannot be inside previous snapshot
+				Command: rf.log[rf.absToLocal(rf.lastApplied)].Command,
+				// pretend 1-indexed. If not, tests fail with "one(100) failed to reach agreement" or "got index 0 but expected 1": 1 is hardcoded in tests
+				CommandIndex: rf.lastApplied + 1,
 			}
 			DPrintf("Raft instance %d has applied command at log index=%d", rf.me, rf.lastApplied)
 		}
@@ -205,15 +302,21 @@ func (rf *Raft) sendAppendEntriesToPeers() int {
 		isLeader := rf.peerState == Leader
 		var args *AppendEntriesArgs
 		nextIndex := -1
-		lastLogIndex := len(rf.log) - 1
+		lastLogIndex := rf.getAbsLogLen() - 1
 		if isLeader {
 			var newEntries []LogEntryApiModel = nil
 			nextIndex, newEntries = rf.getNewEntries(serverid)
 			// "If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex"
-			prevLogIndex := nextIndex - 1 // prev index and term for the very first entry = -1
 			prevLogTerm := noneTerm
-			if prevLogIndex >= 0 {
-				prevLogTerm = rf.log[prevLogIndex].Term // ! TODO runtime error: index out of range [11] with length 6
+			prevLogIndex := nextIndex - 1 // prev index and term for the very first entry = -1
+			prevLogIndexLocal := rf.absToLocal(prevLogIndex)
+			if prevLogIndexLocal >= 0 {
+				prevLogTerm = rf.log[prevLogIndexLocal].Term // ! out of range
+			} else {
+				// 3D: prevLogIndex could be inside snapshot. Therefore send snapshot's metadata.
+				// If there is no snapshot either, that means leader sends very first entries and -1 will be sent.
+				prevLogIndex = rf.lastIncludedIndexInSnapshot
+				prevLogTerm = rf.lastIncludedTermInSnapshot
 			}
 			args = &AppendEntriesArgs{
 				Term:         rf.currentTerm,
@@ -232,7 +335,6 @@ func (rf *Raft) sendAppendEntriesToPeers() int {
 		if isLeader {
 			//DPrintf("Raft isntance %d (Leader) sends AppendEntries request for %d entries, PrevLogIndex=%d LeaderCommit=%d count=%d", rf.me, len(newEntries), prevLogIndex, leaderCommit, len(newEntries))
 			// Send AppendEntries requests in parallel to tolerate crashed servers
-			// IMPORTANT: capture loop variables (serverid and args) by passing them into the closure
 			go func(server int, a *AppendEntriesArgs, nextIndex int, lastLogIndex int) {
 				reply := &AppendEntriesReply{}
 				ok := rf.sendAppendEntries(server, a, reply)
@@ -244,20 +346,32 @@ func (rf *Raft) sendAppendEntriesToPeers() int {
 }
 
 func (rf *Raft) getNewEntries(serverid int) (nextIndex int, entries []LogEntryApiModel) {
-	lastLogIndex := len(rf.log) - 1
-	nextIndex = rf.nextIndex[serverid]
+	// 3D
+	// Example:
+	// log (abs):              0 1 2 3 4
+	// s1 (leader) log: [snapshot] 0 1 2
+	// s2 (follower) log:      0
+	//
+	// s1 nextIndex[s2] will decrease to 1 (abs), but there is no entry on that index in leader's local log
+	// nextIndex needs to be converted to local index:
+	// nextIndexLocal = nextIndex - lastIncludedIndex - 1
+	// nextIndexLocal for 1(abs) = 1 - 1 - 1 = -1: negative nextIndexLocal means there is no such log record anymore and leader must send snapshot instead.
+
+	lastLogIndexLocal := len(rf.log) - 1
+	nextIndexLocal := rf.absToLocal(rf.nextIndex[serverid])
 	var newEntries []LogEntryApiModel = nil
-	if lastLogIndex >= nextIndex {
+	// 3D: nextIndexLocal could be negative (could be inside local snapshot), in this case snapshot must be sent and installed on follower first to increase nextIndex[i]
+	if (nextIndexLocal >= 0) && (nextIndexLocal <= lastLogIndexLocal) {
 		// copy entries to send
-		DPrintf("Raft isntance %d (Leader) has lastLogIndex=%d and nextIndex=%d. Copying entries from log", rf.me, lastLogIndex, nextIndex)
+		DPrintf("Raft isntance %d (Leader) has lastLogIndex=%d and nextIndex=%d. Copying entries from log", rf.me, lastLogIndexLocal, nextIndex)
 		// TODO new leader can try to send all log after failover. Mb add upper limit
-		newEntriesSlice := rf.log[nextIndex : lastLogIndex+1]
+		newEntriesSlice := rf.log[nextIndexLocal : lastLogIndexLocal+1]
 		newEntries = make([]LogEntryApiModel, len(newEntriesSlice))
 		for i, val := range newEntriesSlice {
 			newEntries[i] = LogEntryApiModel{Term: val.Term, Command: val.Command}
 		}
 	}
-	return nextIndex, newEntries
+	return rf.nextIndex[serverid], newEntries // 3D: if nextIndex was negative due to entries missing because of snapshotting, newEntries will be nil = heartbeat
 }
 
 func (rf *Raft) increaseFollowerWatermarksOnLeader(serverid int, lastLogIndex int) {
@@ -270,40 +384,45 @@ func (rf *Raft) increaseFollowerWatermarksOnLeader(serverid int, lastLogIndex in
 
 func (rf *Raft) decreaseFollowerWatermarksOnLeader(serverid int, xterm int, xindex int, xlen int) {
 	if rf.nextIndex[serverid] > 0 {
+
 		old := rf.nextIndex[serverid]
-		newIndex := old
-		// 3C
-		// XTerm:  term in the conflicting entry (if any)
-		// XIndex: index of first entry with that term (if any)
-		// XLen:   log length
-		if (xlen >= 0) && (rf.nextIndex[serverid] > xlen) {
-			// Case 3: follower's log is too short:
-			//     nextIndex = XLen
-			newIndex = xlen
-		} else {
-			if (xterm >= 0) && (xindex >= 0) {
-				lastLogIndex := len(rf.log) - 1
-				prevLogIndex := rf.nextIndex[serverid] - 1
-				i := min(lastLogIndex, prevLogIndex)
-				// Find xterm to the left. No sense to find to the right: follower responded false if term mismatch on prevLogIndex
-				for ; (i >= 0) && (rf.log[i].Term > xterm); i-- {
-				}
-				// now i contains index of last entry with XTerm on leader or entry with lesser term if there is no XTerm on leader
-				if rf.log[i].Term == xterm {
-					// Case 2: leader has XTerm:
-					//     nextIndex = (index of leader's last entry for XTerm) + 1
-					rf.nextIndex[serverid] = i + 1
-					newIndex = i + 1
-				} else {
-					// Case 1: leader doesn't have XTerm:
-					//     nextIndex = XIndex
-					newIndex = xindex
-				}
-			}
-		}
-		if newIndex < rf.nextIndex[serverid] {
-			rf.nextIndex[serverid] = newIndex
-		}
+		rf.nextIndex[serverid] = rf.nextIndex[serverid] - 1
+
+		// TODO 3D
+
+		// newIndex := old
+		// // 3C
+		// // XTerm:  term in the conflicting entry (if any)
+		// // XIndex: index of first entry with that term (if any)
+		// // XLen:   log length
+		// if (xlen >= 0) && (rf.nextIndex[serverid] > xlen) {
+		// 	// Case 3: follower's log is too short:
+		// 	//     nextIndex = XLen
+		// 	newIndex = xlen
+		// } else {
+		// 	if (xterm >= 0) && (xindex >= 0) {
+		// 		lastLogIndex := len(rf.log) - 1
+		// 		prevLogIndex := rf.nextIndex[serverid] - 1
+		// 		i := min(lastLogIndex, prevLogIndex)
+		// 		// Find xterm to the left. No sense to find to the right: follower responded false if term mismatch on prevLogIndex
+		// 		for ; (i >= 0) && (rf.log[i].Term > xterm); i-- {
+		// 		}
+		// 		// now i contains index of last entry with XTerm on leader or entry with lesser term if there is no XTerm on leader
+		// 		if rf.log[i].Term == xterm {
+		// 			// Case 2: leader has XTerm:
+		// 			//     nextIndex = (index of leader's last entry for XTerm) + 1
+		// 			rf.nextIndex[serverid] = i + 1
+		// 			newIndex = i + 1
+		// 		} else {
+		// 			// Case 1: leader doesn't have XTerm:
+		// 			//     nextIndex = XIndex
+		// 			newIndex = xindex
+		// 		}
+		// 	}
+		// }
+		// if newIndex < rf.nextIndex[serverid] {
+		// 	rf.nextIndex[serverid] = newIndex
+		// }
 
 		DPrintf("Raft instance %d (Leader) decreased nextIndex[%d] from %d to %d", rf.me, serverid, old, rf.nextIndex[serverid])
 	}
@@ -311,10 +430,10 @@ func (rf *Raft) decreaseFollowerWatermarksOnLeader(serverid int, xterm int, xind
 
 // AppendEntries RPC Handler
 func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogIndex int, prevLogTerm int, newEntries []LogEntryApiModel) (ok bool, xterm int, xindex int, xlen int) {
-	// "Reply false if term < currentTerm (§5.1)"
+	// "1. Reply false if term < currentTerm (§5.1)"
 	xterm = -1
 	xindex = -1
-	xlen = len(rf.log)
+	xlen = len(rf.log) // TODO 3D
 	if leaderTerm < rf.currentTerm {
 		return false, xterm, xindex, xlen // ignore zombie leaders: Reply false if term < currentTerm (§5.1)
 	}
@@ -322,22 +441,28 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 	if rf.increaseTerm(leaderTerm) {
 		DPrintf("Raft instance %d detected higher term %d while handling heartbeat. Converting to follower", rf.me, leaderTerm)
 	}
+	// "2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)"
 	if !rf.isLogConsistentWithLeader(prevLogIndex, prevLogTerm) {
-		// "Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)"
+
 		// 3C:
 		// XTerm:  term in the conflicting entry (if any)
 		// XIndex: index of first entry with that term (if any)
 		// XLen:   log length
-		if (prevLogIndex >= 0) && (prevLogIndex < len(rf.log)) {
-			xterm = rf.log[prevLogIndex].Term
-			for i := prevLogIndex; (i >= 0) && (rf.log[i].Term == xterm); i-- {
-				xindex = i
-			}
-		}
+
+		// TODO 3D
+		// if (prevLogIndex >= 0) && (prevLogIndex < len(rf.log)) {
+		// 	xterm = rf.log[prevLogIndex].Term
+		// 	for i := prevLogIndex; (i >= 0) && (rf.log[i].Term == xterm); i-- {
+		// 		xindex = i
+		// 	}
+		// }
 		return false, xterm, xindex, xlen
 	}
+
 	if len(newEntries) > 0 { // newEntries is empty for heatbeats
+		// "3. If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)"
 		newEntriesIndex := rf.deleteConflictingEntriesOnFollower(prevLogIndex, newEntries)
+		// "4. Append any new entries not already in the log"
 		rf.appentNewEntries(newEntriesIndex, newEntries)
 		rf.persist()
 		//rf.printLog()
@@ -353,24 +478,149 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 	return true, xterm, xindex, xlen
 }
 
+// Consistency Check on follower
+func (rf *Raft) isLogConsistentWithLeader(prevLogIndex int, prevLogTerm int) bool {
+
+	// ! Rewritten. Could contain bugs. Needs to test separately in 3A-3C.
+
+	// if prevLogIndex == -1 then the very first entry at index 0 is being sent, or log is empty. -1 passes Consistency Check
+	if prevLogIndex < 0 {
+		return true
+	}
+
+	// 3D
+	// lastIncludedIndex is guaranteed to be committed: only committed and applied entries are included in snapshot.
+	// This means that every index <= lastIncludedIndex is committed in cluster.
+	// Therefore when leader sends prevLogIndex <= lastIncludedIndex it means that prevLogIndex is committed too, because each leader contains all committed entries.
+	// So this follower's shapshot surely contains prevLogIndex and we need to apply entries after lastIncludedIndex.
+	if prevLogIndex <= rf.lastIncludedIndexInSnapshot {
+		return true
+	}
+
+	lastLogIndexLocal := len(rf.log) - 1
+	prevLogIndexLocal := rf.absToLocal(prevLogIndex) // absToLocal() could return negative idx if it's inside snapshot but above we return true if so
+	if (prevLogIndexLocal <= lastLogIndexLocal) && (rf.log[prevLogIndexLocal].Term == prevLogTerm) {
+		return true
+	}
+
+	return false
+}
+
 func (rf *Raft) deleteConflictingEntriesOnFollower(prevLogIndex int, newEntries []LogEntryApiModel) int {
 	// "If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)"
+
+	// 3D
+	// Case: prevLogIndex could be outside snapshot:
+	// entries(local) =    0 1 2     (entries are 0-indexed slice)
+	// entries(abs) =      3 4 5
+	// prevLogIndex =    2           (prevLogIndex is global and points where entries globally start in the log)
+	// log (abs) =   0 1 2 3 4 5
+	// log (local) =     0 1
+	// snapshot =    0 1 <-- lastIncludedIndex
+	// Where log comparison starts:
+	// logIndex = absToLocal(prevLogIndex) + 1 = (prevLogIndex - lastIncludedIndex - 1) + 1 = 2 - 1 - 1 + 1 = 1 (OK)
+	// newEntriesIndex = 0 (OK)
+	//
+	// Case: prevLogIndex == lastIncludedIndex:
+	// entries(local) =    0 1 2     (entries are 0-indexed slice)
+	// entries(abs) =      3 4 5
+	// prevLogIndex =    2           (prevLogIndex is global and points where entries globally start in the log)
+	// log (abs) =   0 1 2 3 4 5
+	// log (local) =       0
+	// snapshot =    0 1 2 <-- lastIncludedIndex
+	// logIndex = 0 (OK)
+	// newEntriesIndex = lastIncludedIndexInSnapshot - prevLogIndex = 0 - 0 = 0 (OK)
+	//
+	// Case: prevLogIndex could be inside snapshot and some entries too:
+	// entries(local) =  0 1 2 3   (entries are 0-indexed slice)
+	// entries(abs) =    2 3 4 5
+	// prevLogIndex =  1           (prevLogIndex is global and points where entries globally start in the log)
+	// log (abs) =   0 1 2 3 4 5
+	// log (local) =       0
+	// snapshot =    0 1 2 <-- lastIncludedIndex
+	// logIndex = 0 (OK)
+	// newEntriesIndex = lastIncludedIndex - prevLogIndex = 2 - 1 = 1 (OK)
+	//
+	// Case: prevLogIndex and entries could be completely inside snapshot:
+	// entries(local) =   0 1         (entries are 0-indexed slice)
+	// entries(abs) =     1 2
+	// prevLogIndex =   0             (prevLogIndex is global and points where entries globally start in the log)
+	// log (abs) =      0 1 2 3 4 5
+	// log (local) =          0 1 2
+	// snapshot =       0 1 2 <-- lastIncludedIndex
+	// logIndex = 0 (OK)
+	// newEntriesIndex = lastIncludedIndex - prevLogIndex = 2 - 0 = 2 (OK)
+	//
+	// Case: prevLogIndex == 0, lastIncludedIndex == 0
+	// entries(local) =   0 1         (entries are 0-indexed slice)
+	// entries(abs) =     1 2
+	// prevLogIndex =   0             (prevLogIndex is global and points where entries globally start in the log)
+	// log (abs) =      0 1 2 3 4 5
+	// log (local) =      0 1 2 3 4
+	// snapshot =       0 <-- lastIncludedIndex
+	// logIndex = 0 (OK)
+	// newEntriesIndex = lastIncludedIndex - prevLogIndex = 0 - 0 = 0 (OK)
+	//
+	// Case: prevLogIndex == -1, some entries are inside snapshot
+	// entries(local) = 0 1 2 3 4     (entries are 0-indexed slice)
+	// entries(abs) =   0 1 2 3 4
+	// prevLogIndex = -1              (prevLogIndex is global and points where entries globally start in the log)
+	// log (abs) =      0 1 2 3 4 5
+	// log (local) =          0 1 2
+	// snapshot =       0 1 2 <-- lastIncludedIndex
+	// logIndex = 0 (OK)
+	// newEntriesIndex = lastIncludedIndex - prevLogIndex = 2 - - 1 = 3 (OK)
+	//
+	// Case: prevLogIndex == -1, all entries are inside snapshot
+	// entries(local) = 0 1 2         (entries are 0-indexed slice)
+	// entries(abs) =   0 1 2
+	// prevLogIndex = -1              (prevLogIndex is global and points where entries globally start in the log)
+	// log (abs) =      0 1 2 3 4 5
+	// log (local) =          0 1 2
+	// snapshot =       0 1 2 <-- lastIncludedIndex
+	// logIndex = 0 (OK)
+	// newEntriesIndex = lastIncludedIndex - prevLogIndex = 2 - - 1 = 3 (OK)
+	//
+	// Case: prevLogIndex == -1, lastIncludedIndex == 0
+	// entries(local) = 0 1 2         (entries are 0-indexed slice)
+	// entries(abs) =   0 1 2
+	// prevLogIndex = -1              (prevLogIndex is global and points where entries globally start in the log)
+	// log (abs) =      0 1 2 3 4 5
+	// log (local) =      0 1 2 3 4
+	// snapshot =       0 <-- lastIncludedIndex
+	// logIndex = 0 (OK)
+	// newEntriesIndex = lastIncludedIndex - prevLogIndex = 0 - - 1 = 1 (OK)
+	//
+	// Case: prevLogIndex == -1, lastIncludedIndex == -1 (no snapshot)
+	// entries(local) = 0 1 2         (entries are 0-indexed slice)
+	// entries(abs) =   0 1 2
+	// prevLogIndex = -1              (prevLogIndex is global and points where entries globally start in the log)
+	// log (abs) =      0 1 2 3 4 5
+	// log (local) =    0 1
+	// snapshot =     -1 <-- lastIncludedIndex
+	// logIndex = 0 (OK)
+	// newEntriesIndex = lastIncludedIndex - prevLogIndex = -1 - - 1 = 0 (OK)
+
+	// If prevLogIndex is outside snapshot, convert it to local log index (substract includedIndex) and merge as usual.
+	// If prevLogIndex is inside snapshot, skip some entries that might be in snapshot and start merging with the local log at index 0.
 	newEntriesIndex := 0
-	lastLogIndex := len(rf.log) - 1
-	logIndex := prevLogIndex + 1
-	for _, entry := range newEntries {
-		if logIndex > lastLogIndex {
+	logIndex := rf.absToLocal(prevLogIndex) + 1
+	if prevLogIndex <= rf.lastIncludedIndexInSnapshot { // lastLogIndex is inside local snapshot
+		newEntriesIndex = rf.lastIncludedIndexInSnapshot - prevLogIndex // skip new entries that already present in the snapshot
+		logIndex = 0
+	}
+
+	lastLogIndexLocal := len(rf.log) - 1
+	for newEntriesIndex < len(newEntries) {
+		if logIndex > lastLogIndexLocal { // no more items in the log
 			break
 		}
-		if entry.Term != rf.log[logIndex].Term { // ? can Entries reorder due serialization? it can lead to log reordering
-			rf.log = rf.log[:logIndex]
+		if newEntries[newEntriesIndex].Term != rf.log[logIndex].Term {
+			rf.log = rf.log[:logIndex] // found mismatch, delete all log entries staring here
 			break
 		}
 		logIndex++
 		newEntriesIndex++
-		if newEntriesIndex == len(newEntries) {
-			break
-		}
 	}
 	return newEntriesIndex
 }
@@ -395,7 +645,10 @@ func (rf *Raft) increaseCommitIndexOnLeader() (ok bool, newCommitIndex int) {
 	copy(matchIndexSorted, rf.matchIndex)
 	sort.Ints(matchIndexSorted)
 	commitIndex := matchIndexSorted[len(matchIndexSorted)-rf.majority] // leader's matchIndex is now taken into account
-	if (commitIndex >= 0) && (commitIndex > rf.commitIndex) && (rf.log[commitIndex].Term == rf.currentTerm) {
+
+	// 3D: current commitIndex could be inside snapshot, in this case it always equals to lastIncludedIndex: snapshot contains only committed records.
+	//   New commitIndex is always greater than current commitIndex, so it's always outside snapshot.
+	if (commitIndex >= 0) && (commitIndex > rf.commitIndex) && (rf.log[rf.absToLocal(commitIndex)].Term == rf.currentTerm) {
 		DPrintf("Raft instance %d (Leader) increasing commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
 		rf.commitIndex = commitIndex
 		return true, commitIndex
@@ -419,27 +672,16 @@ func (rf *Raft) increaseCommitIndexOnFollower(leaderCommit int, prevLogIndex int
 			rf.commitIndex = min(leaderCommit, lastNewEntryIndex)
 		} else {
 			// heartbeat
-			rf.commitIndex = min(leaderCommit, len(rf.log)-1) // ?
+			rf.commitIndex = min(leaderCommit, rf.getAbsLogLen()-1) // ?
 		}
 		return true
 	}
 	return false
 }
 
-// Consistency Check
-func (rf *Raft) isLogConsistentWithLeader(prevLogIndex int, prevLogTerm int) bool {
-	lastLogIndex := len(rf.log) - 1
-	// if prevLogIndex = -1 then the very first entry at index 0 is being sent, or log is empty. -1 passes Consistency Check
-	if (prevLogIndex >= 0) && ((prevLogIndex > lastLogIndex) || (rf.log[prevLogIndex].Term != prevLogTerm)) {
-		return false
-	}
-	return true
-}
-
 func (rf *Raft) startElection() {
 	for rf.killed() == false {
-		// Your code here (3A)
-		// Check if a leader election should be started.
+		// 3A: Check if a leader election should be started.
 		rf.mu.Lock()
 		needElection := rf.needElection()
 		rf.mu.Unlock()
@@ -448,10 +690,15 @@ func (rf *Raft) startElection() {
 			DPrintf("Raft instance %d election timeout elapsed, starting election", rf.me)
 			rf.mu.Lock()
 			currentTerm, electionTimeoutMs := rf.transitionToCandidate()
-			lastLogIndex := len(rf.log) - 1
-			lastLogTerm := -1
-			if lastLogIndex >= 0 {
-				lastLogTerm = rf.log[lastLogIndex].Term
+			lastLogIndex := rf.getAbsLogLen() - 1
+			lastLogIndexLocal := len(rf.log) - 1
+			lastLogTerm := noneTerm
+			if lastLogIndexLocal >= 0 {
+				lastLogTerm = rf.log[lastLogIndexLocal].Term
+			} else {
+				if rf.lastIncludedIndexInSnapshot >= 0 {
+					lastLogTerm = rf.lastIncludedTermInSnapshot
+				}
 			}
 			rf.mu.Unlock()
 
@@ -550,20 +797,16 @@ func (rf *Raft) transitionToCandidate() (newTerm int, newElectionTimeoutMs int) 
 }
 
 func (rf *Raft) transitionToLeader(termWhenPeerWasCandidate int) (ok bool) {
-	// TODO transision success only if enough votes received proveiously whic stored in a field
-	//   mb not needed: the method isn't supposed to be public, no need to store votes as field.
-	//   but mb needed: the Raft class is state of the Raft consensus. And the outer cycle is a client to the Raft class.
 	if (rf.peerState == Candidate) && (rf.currentTerm == termWhenPeerWasCandidate) { // could have been changed to Follower by RPCs
 		rf.transitionPeerState(Leader)
-		// Initialize nextIndex and matchIndex for all peers when becoming leader.
-		lastLogIndex := len(rf.log) - 1
+		// initialize nextIndex and matchIndex for all peers when becoming leader
+		lastLogIndex := rf.getAbsLogLen() - 1
 		for i := range rf.peers {
 			rf.nextIndex[i] = lastLogIndex + 1
 			rf.matchIndex[i] = -1
 		}
 		// leader counts itself as having all its log entries
 		rf.matchIndex[rf.me] = lastLogIndex
-		rf.nextIndex[rf.me] = lastLogIndex + 1
 		return true
 	}
 	return false
@@ -638,10 +881,16 @@ func (rf *Raft) voteForCandidate(candidateId, candidateTerm int, candidateLastLo
 	// candidate.term > peer.term: candidate has newer log. grant vote.
 	// candidate.term == peer.term: check log index. if candidate.index >= peer.index: candidate has newer or same log. grant vote.
 	// otherwise: false.
-	lastLogIndex := len(rf.log) - 1
+	lastLogIndex := rf.getAbsLogLen() - 1
+	lastLogIndexLocal := len(rf.log) - 1
+	// TODO move to a method - here and on leader
 	lastLogTerm := -1
-	if lastLogIndex >= 0 {
-		lastLogTerm = rf.log[lastLogIndex].Term
+	if lastLogIndexLocal >= 0 {
+		lastLogTerm = rf.log[lastLogIndexLocal].Term
+	} else {
+		if rf.lastIncludedIndexInSnapshot >= 0 {
+			lastLogTerm = rf.lastIncludedTermInSnapshot
+		}
 	}
 
 	candidateLogGreaterOrEquals := (candidateLastLogTerm > lastLogTerm) || ((candidateLastLogTerm == lastLogTerm) && (candidateLastLogIndex >= lastLogIndex))
@@ -810,13 +1059,13 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader = rf.peerState == Leader
 	if isLeader {
 		rf.log = append(rf.log, LogEntry{command, term})
-		index = len(rf.log) // pretend 1-indexed. If not, tests fail with "one(100) failed to reach agreement" or "got index 0 but expected 1": 1 is hardcoded in tests
-		rf.persist()        // 3C
-		DPrintf("Raft instance %d (Leader) appended log entry cmd=%v to local log at index=%d", rf.me, command, index)
+		index = rf.getAbsLogLen() // pretend 1-indexed. If not, tests fail with "one(100) failed to reach agreement" or "got index 0 but expected 1": 1 is hardcoded in tests
 		// update leader's own watermarks so leader counts itself for replication/commit
-		lastLogIndex := len(rf.log) - 1
+		lastLogIndex := index - 1
 		rf.matchIndex[rf.me] = lastLogIndex
 		rf.nextIndex[rf.me] = lastLogIndex + 1
+		rf.persist() // 3C
+		DPrintf("Raft instance %d (Leader) appended log entry cmd=%v to local log at index=%d (1-indexed)", rf.me, command, index)
 		//rf.printLog()
 	}
 	rf.mu.Unlock()
@@ -878,15 +1127,29 @@ func (rf *Raft) persist() {
 	// raftstate := buffer.Bytes()
 	// rf.persister.Save(raftstate, nil)
 
-	buffer := new(bytes.Buffer)
-	encoder := labgob.NewEncoder(buffer)
+	stateBuffer := new(bytes.Buffer)
+	encoder := labgob.NewEncoder(stateBuffer)
 	raftState := RaftState{
 		CurrentTerm: rf.currentTerm,
 		VotedFor:    rf.votedFor,
 		Log:         rf.log, // copy?
 	}
 	encoder.Encode(raftState)
-	rf.persister.Save(buffer.Bytes(), nil)
+	if rf.snapshot == nil {
+		rf.persister.Save(stateBuffer.Bytes(), nil)
+		return
+	}
+
+	var snapshotBuffer *bytes.Buffer
+	snapshotBuffer = new(bytes.Buffer)
+	encoder = labgob.NewEncoder(snapshotBuffer)
+	snapshotState := SnapshotState{
+		LastIncludedIndex: rf.lastIncludedIndexInSnapshot,
+		LastIncludedTerm:  rf.lastIncludedTermInSnapshot,
+		Snapshot:          rf.snapshot,
+	}
+	encoder.Encode(snapshotState)
+	rf.persister.Save(stateBuffer.Bytes(), snapshotBuffer.Bytes())
 
 	//compareRaftStates(raftState, rf.persister)
 }
@@ -915,10 +1178,11 @@ func compareRaftStates(before RaftState, persister *tester.Persister) {
 
 // restore previously persisted state.
 func (rf *Raft) readPersist(data []byte) {
+	// 3C
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-	// Your code here (3C).
+
 	// Example:
 	// r := bytes.NewBuffer(data)
 	// d := labgob.NewDecoder(r)
@@ -944,20 +1208,28 @@ func (rf *Raft) readPersist(data []byte) {
 	rf.log = loadedState.Log
 }
 
+func (rf *Raft) readSnapshot(data []byte) {
+	// 3D
+	if data == nil || len(data) < 1 {
+		return
+	}
+	buffer := bytes.NewBuffer(data)
+	decoder := gob.NewDecoder(buffer)
+	var loadedState SnapshotState
+	err := decoder.Decode(&loadedState)
+	if err != nil {
+		DPrintf("ERROR while decoding snapshot: %v", err)
+	}
+	rf.lastIncludedIndexInSnapshot = loadedState.LastIncludedIndex
+	rf.lastIncludedTermInSnapshot = loadedState.LastIncludedTerm
+	rf.snapshot = loadedState.Snapshot
+}
+
 // how many bytes in Raft's persisted log?
 func (rf *Raft) PersistBytes() int {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	return rf.persister.RaftStateSize()
-}
-
-// the service says it has created a snapshot that has
-// all info up to and including index. this means the
-// service no longer needs the log through (and including)
-// that index. Raft should now trim its log as much as possible.
-func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (3D).
-
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
