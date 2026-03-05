@@ -2,7 +2,7 @@ package raft
 
 import (
 	"fmt"
-	//log
+	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -11,7 +11,7 @@ import (
 
 	"6.5840/labrpc"
 	"6.5840/raftapi"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
 type Test struct {
@@ -29,6 +29,9 @@ type Test struct {
 }
 
 func makeTest(t *testing.T, n int, reliable bool, snapshot bool) *Test {
+
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+
 	ts := &Test{
 		t:        t,
 		n:        n,

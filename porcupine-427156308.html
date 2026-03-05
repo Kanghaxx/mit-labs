@@ -1,0 +1,1024 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Porcupine</title>
+    <style>
+      html {
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 16px;
+}
+
+text {
+  dominant-baseline: middle;
+}
+
+#legend {
+  position: fixed;
+  left: 10px;
+  top: 10px;
+  background-color: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(3px);
+  padding: 5px 2px 1px 2px;
+  border-radius: 4px;
+}
+
+#canvas {
+  margin-top: 45px;
+}
+
+#calc {
+  width: 0;
+  height: 0;
+  visibility: hidden;
+}
+
+.bg {
+  fill: transparent;
+}
+
+.divider {
+  stroke: #ccc;
+  stroke-width: 1;
+}
+
+.history-rect {
+  stroke: #888;
+  stroke-width: 1;
+  fill: #42d1f5;
+}
+
+.client-annotation-rect {
+  stroke: #888;
+  stroke-width: 1;
+  fill: #e0e0e0;
+}
+
+.link {
+  fill: #206475;
+  cursor: pointer;
+}
+
+.selected {
+  stroke-width: 5;
+}
+
+.target-rect {
+  opacity: 0;
+}
+
+.history-text {
+  font-size: 0.9rem;
+  font-family:
+    Menlo,
+    Courier New,
+    monospace;
+}
+
+.hidden {
+  opacity: 0.2;
+}
+
+.hidden line {
+  opacity: 0.5; /* note: this is multiplicative */
+}
+
+.linearization {
+  stroke: rgba(0, 0, 0, 0.5);
+}
+
+.linearization-invalid {
+  stroke: rgba(255, 0, 0, 0.5);
+}
+
+.linearization-point {
+  stroke-width: 5;
+}
+
+.linearization-line {
+  stroke-width: 2;
+}
+
+.tooltip {
+  position: absolute;
+  display: none;
+  width: max-content;
+  max-width: 300px;
+  border: 1px solid #ccc;
+  background: white;
+  border-radius: 4px;
+  padding: 5px;
+  font-size: 0.8rem;
+}
+
+.inactive {
+  display: none;
+}
+
+    </style>
+  </head>
+  <body>
+    <div id="legend">
+      <svg xmlns="http://www.w3.org/2000/svg" width="660" height="20">
+        <text x="0" y="10">Clients</text>
+        <line x1="50" y1="0" x2="70" y2="20" stroke="#000" stroke-width="1"></line>
+        <text x="70" y="10">Time</text>
+        <line x1="110" y1="10" x2="200" y2="10" stroke="#000" stroke-width="2"></line>
+        <polygon points="200,5 200,15, 210,10" fill="#000"></polygon>
+        <rect x="300" y="5" width="10" height="10" fill="rgba(0, 0, 0, 0.5)"></rect>
+        <text x="315" y="10">Valid LP</text>
+        <rect x="400" y="5" width="10" height="10" fill="rgba(255, 0, 0, 0.5)"></rect>
+        <text x="415" y="10">Invalid LP</text>
+        <text x="520" y="10" id="jump-link" class="link">[ jump to first error ]</text>
+      </svg>
+    </div>
+    <div id="canvas"></div>
+    <div id="calc"></div>
+    <script>
+      'use strict' // eslint-disable-line unicorn/prefer-module
+
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
+function svgnew(tag, attributes) {
+  const element = document.createElementNS(SVG_NS, tag)
+  svgattr(element, attributes)
+  return element
+}
+
+function svgattr(element, attributes) {
+  if (attributes) {
+    for (const k in attributes) {
+      if (Object.hasOwn(attributes, k)) {
+        element.setAttributeNS(null, k, attributes[k])
+      }
+    }
+  }
+}
+
+function svgattach(parent, child) {
+  // eslint-disable-next-line unicorn/prefer-dom-node-append
+  return parent.appendChild(child)
+}
+
+function svgadd(element, tag, attributes) {
+  return svgattach(element, svgnew(tag, attributes))
+}
+
+function newArray(n, function_) {
+  const array = Array.from({length: n})
+  for (let i = 0; i < n; i++) {
+    array[i] = function_(i)
+  }
+
+  return array
+}
+
+function arrayEq(a, b) {
+  if (a === b) {
+    return true
+  }
+
+  if (a === undefined || a === null || b === undefined || b === null) {
+    return false
+  }
+
+  if (a.length !== b.length) {
+    return false
+  }
+
+  for (const [i, element] of a.entries()) {
+    if (element !== b[i]) {
+      return false
+    }
+  }
+
+  return true
+}
+
+// eslint-disable-next-line no-unused-vars, complexity
+function render(data) {
+  const PADDING = 10
+  const BOX_HEIGHT = 30
+  const BOX_SPACE = 15
+  const EPSILON = 20
+  const LINE_BLEED = 5
+  const BOX_GAP = 20
+  const BOX_TEXT_PADDING = 10
+  const HISTORY_RECT_RADIUS = 4
+
+  const annotations = data.Annotations
+  const coreHistory = data.Partitions
+  // For simplicity, make annotations look like more history
+  const allData = [...coreHistory, {History: annotations}]
+
+  let maxClient = -1
+  for (const partition of allData) {
+    for (const element of partition.History) {
+      maxClient = Math.max(maxClient, element.ClientId)
+    }
+  }
+
+  // "real" clients, not including tags
+  const realClients = maxClient + 1
+  // We treat each unique annotation tag as another "client"
+  const tags = new Set()
+  for (const annot of annotations) {
+    const tag = annot.Tag
+    if (tag.length > 0) {
+      tags.add(tag)
+    }
+  }
+
+  // Add synthetic client numbers
+  const tag2ClientId = {}
+  const sortedTags = Array.from(tags).sort()
+  for (const tag of sortedTags) {
+    maxClient += 1
+    tag2ClientId[tag] = maxClient
+  }
+
+  for (const annot of annotations) {
+    const tag = annot.Tag
+    if (tag.length > 0) {
+      annot.ClientId = tag2ClientId[tag]
+    }
+  }
+
+  // Total number of clients now includes these synthetic clients
+  const nClient = maxClient + 1
+
+  // Prepare some useful data to be used later:
+  // - Add a GID to each event
+  // - Create a mapping from GIDs back to events
+  // - Create a set of all timestamps
+  // - Create a set of all start timestamps
+  const allTimestamps = new Set()
+  const startTimestamps = new Set()
+  const endTimestamps = new Set()
+  let gid = 0
+  const byGid = {}
+  for (const partition of allData) {
+    for (const element of partition.History) {
+      allTimestamps.add(element.Start)
+      startTimestamps.add(element.Start)
+      endTimestamps.add(element.End)
+      allTimestamps.add(element.End)
+      // Give elements GIDs
+      element.Gid = gid
+      byGid[gid] = element
+      gid++
+    }
+  }
+
+  let sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b)
+
+  // If one event has the same end time as another's start time, that means that
+  // they are concurrent, and we need to display them with overlap. We do this
+  // by tweaking the events that share the end time, updating the time to
+  // end+epsilon, so we have overlap.
+  //
+  // We do not render a good visualization in the situation where a single
+  // client has two events where one has an end time that matches the other's
+  // start time.  There isn't an easy way to handle this, because these two
+  // operations are concurrent (see the comment in model.go for more details for
+  // why it must be this way), and we can't display them with overlap on the
+  // same row cleanly.
+  const epsilon = 16
+  // Coordinated with computeVisualizationData, which uses an incrementing
+  // counter multiplied by 100, so it's safe to adjust timestamps by += epsilon
+  // without it overlapping with another adjusted timestamp (2*16 < 100)
+  for (const [index, partition] of allData.entries()) {
+    if (index === allData.length - 1) {
+      continue // Last partition is the annotations
+    }
+
+    for (const element of partition.History) {
+      const end = element.End
+      if (startTimestamps.has(end)) {
+        element.End = end + epsilon
+        allTimestamps.add(element.End)
+      }
+    }
+  }
+
+  // Handle display of (1) annotations where one has the same end time as
+  // another's start time, and (2) point-in-time annotations, on the same row.
+  //
+  // Unlike operations, where we interpret the start and end times as a closed
+  // interval (and where they have to be displayed with overlap, to be able to
+  // render linearizations and partial linearizations correctly), annotations
+  // are for display purposes only and we can interpret annotations with
+  // different start/end times as open intervals, and render two annotations
+  // with times (a, b) and (b, c) without overlap. We can also handle the
+  // situation where we have a point-in-time annotation with times (b, b).
+  //
+  // This code currently does not handle the case where we have two
+  // point-in-time annotations with the same tag at the same timestamp.
+  //
+  // We keep the annotation adjustment epsilon even smaller (dividing by 2), so
+  // adjusting an event's end time forward by epsilon doesn't overlap with an
+  // annotation's start time that's adjusted forwards (the adjustment of
+  // annotations goes in the opposite direction as that for events).
+  for (const element of allData.at(-1).History) {
+    if (element.End === element.Start) {
+      // Point-in-time annotation: we adjust these to have a non-zero-duration;
+      // we only need to edit the end timestamp, and we can leave the start
+      // as-is
+      element.End += epsilon / 4
+      allTimestamps.add(element.End)
+    } else {
+      // Annotation touching another event or annotation
+      if (startTimestamps.has(element.End)) {
+        element.End -= epsilon / 2
+        allTimestamps.add(element.End)
+      }
+
+      if (endTimestamps.has(element.Start)) {
+        element.Start += epsilon / 2
+        allTimestamps.add(element.Start)
+      }
+    }
+  }
+
+  // Update sortedTimestamps, because we created some new timestamps.
+  sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b)
+
+  // Compute layout.
+  //
+  // We warp time to make it easier to see what's going on. We can think
+  // of there being a monotonically increasing mapping from timestamps to
+  // x-positions. This mapping should satisfy some criteria to make the
+  // visualization interpretable:
+  //
+  // - distinguishability: there should be some minimum distance between
+  // unequal timestamps
+  // - visible text: history boxes should be wide enough to fit the text
+  // they contain
+  // - enough space for LPs: history boxes should be wide enough to fit
+  // all linearization points that go through them, while maintaining
+  // readability of linearizations (where each LP in a sequence is spaced
+  // some minimum distance away from the previous one)
+  //
+  // Originally, I thought about this as a linear program:
+  //
+  // - variables for every unique timestamp, x_i = warp(timestamp_i)
+  // - objective: minimize sum x_i
+  // - constraint: non-negative
+  // - constraint: ordering + distinguishability, timestamp_i < timestamp_j -> x_i + EPS < x_j
+  // - constraint: visible text, size_text_j < x_{timestamp_j_end} - x_{timestamp_j_start}
+  // - constraint: linearization lines have points that fit within box, ...
+  //
+  // This used to actually be implemented using an LP solver (without the
+  // linearization point part, though that should be doable too), but
+  // then I realized it's possible to solve optimally using a greedy
+  // left-to-right scan in linear time.
+  //
+  // So that is what we do here. We optimally solve the above, and while
+  // doing so, also compute some useful information (e.g. x-positions of
+  // linearization points) that is useful later.
+  const xPos = {}
+  // Compute some information about history elements, sorted by end time;
+  // the most important information here is box width.
+  const byEnd = allData
+    .flatMap((partition) =>
+      partition.History.map((element) => {
+        // Compute width of the text inside the history element by actually
+        // drawing it (in a hidden div)
+        const scratch = document.querySelector('#calc')
+        scratch.innerHTML = ''
+        const svg = svgadd(scratch, 'svg')
+        const text = svgadd(svg, 'text', {
+          'text-anchor': 'middle',
+          class: 'history-text',
+        })
+        text.textContent = element.Description
+        const bbox = text.getBBox()
+        const width = bbox.width + 2 * BOX_TEXT_PADDING
+        return {
+          start: element.Start,
+          end: element.End,
+          width,
+          gid: element.Gid,
+        }
+      })
+    )
+    .sort((a, b) => a.end - b.end)
+  // Some preprocessing for linearization points and illegal next
+  // linearizations. We need to figure out where exactly LPs end up
+  // as we go, so we can make sure event boxes are wide enough.
+  const eventToLinearizations = newArray(gid, () => []) // Event -> [{index, position}]
+  const eventIllegalLast = newArray(gid, () => []) // Event -> [index]
+  const allLinearizations = []
+  let lgid = 0
+  for (const partition of coreHistory) {
+    for (const lin of partition.PartialLinearizations) {
+      const globalized = [] // Linearization with global indexes instead of partition-local ones
+      const included = new Set() // For figuring out illegal next LPs
+      for (const [position, id] of lin.entries()) {
+        included.add(id.Index)
+        const gid = partition.History[id.Index].Gid
+        globalized.push(gid)
+        eventToLinearizations[gid].push({index: lgid, position})
+      }
+
+      allLinearizations.push(globalized)
+      let minEnd = Infinity
+      for (const [index, element] of partition.History.entries()) {
+        if (!included.has(index)) {
+          minEnd = Math.min(minEnd, element.End)
+        }
+      }
+
+      for (const [index, element] of partition.History.entries()) {
+        if (!included.has(index) && element.Start < minEnd) {
+          eventIllegalLast[element.Gid].push(lgid)
+        }
+      }
+
+      lgid++
+    }
+  }
+
+  const linearizationPositions = newArray(lgid, () => []) // [[xpos]]
+  // Okay, now we're ready to do the left-to-right scan.
+  // Solve timestamp -> xPos.
+  let eventIndex = 0
+  xPos[sortedTimestamps[0]] = 0 // Positions start at 0
+  for (let i = 1; i < sortedTimestamps.length; i++) {
+    // Left-to-right scan, finding minimum time we can use
+    const ts = sortedTimestamps[i]
+    // Ensure some gap from last timestamp
+    let pos = xPos[sortedTimestamps[i - 1]] + BOX_GAP
+    // Ensure that text fits in boxes
+    while (eventIndex < byEnd.length && byEnd[eventIndex].end <= ts) {
+      // Push our position as far as necessary to accommodate text in box
+      const event_ = byEnd[eventIndex]
+      const textEndPos = xPos[event_.start] + event_.width
+      pos = Math.max(pos, textEndPos)
+      // Ensure that LPs fit in box.
+      //
+      // When placing the end of an event, for all partial linearizations
+      // that include that event, for the prefix that comes before that event,
+      // all their start points must have been placed already, so we can figure
+      // out the minimum width that the box needs to be to accommodate the LP.
+      for (const li of eventToLinearizations[event_.gid].concat(
+        eventIllegalLast[event_.gid].map((index) => {
+          return {
+            index,
+            position: allLinearizations[index].length - 1,
+          }
+        })
+      )) {
+        const {index, position} = li
+        for (let i = linearizationPositions[index].length; i <= position; i++) {
+          // Determine past points
+          let previous = null
+          // eslint-disable-next-line max-depth
+          if (linearizationPositions[index].length > 0) {
+            previous = linearizationPositions[index][i - 1]
+          }
+
+          const nextGid = allLinearizations[index][i]
+          const nextPos =
+            previous === null
+              ? xPos[byGid[nextGid].Start]
+              : Math.max(xPos[byGid[nextGid].Start], previous + EPSILON)
+
+          linearizationPositions[index].push(nextPos)
+        }
+
+        // This next line only really makes sense for the ones in
+        // eventToLinearizations, not the ones from eventIllegalLast,
+        // but it's safe to do it for all points, so we don't bother to
+        // distinguish.
+        pos = Math.max(pos, linearizationPositions[index][position])
+      }
+
+      // Ensure that illegal next LPs fit in box too
+      for (const li of eventIllegalLast[event_.gid]) {
+        const lin = linearizationPositions[li]
+        const previous = lin.at(-1)
+        pos = Math.max(pos, previous + EPSILON)
+      }
+
+      eventIndex++
+    }
+
+    xPos[ts] = pos
+  }
+
+  // Get maximum tag width
+  let maxTagWidth = 0
+  for (let i = 0; i < nClient; i++) {
+    const tag = i < realClients ? i.toString() : sortedTags[i - realClients]
+    const scratch = document.querySelector('#calc')
+    scratch.innerHTML = ''
+    const svg = svgadd(scratch, 'svg')
+    const text = svgadd(svg, 'text', {
+      'text-anchor': 'end',
+    })
+    text.textContent = tag
+    const bbox = text.getBBox()
+    const width = bbox.width + 2 * BOX_TEXT_PADDING
+    if (width > maxTagWidth) {
+      maxTagWidth = width
+    }
+  }
+
+  const t0x = PADDING + maxTagWidth // X-pos of line at t=0
+
+  // Solved, now draw UI.
+
+  let selected = false
+  let selectedIndex = [-1, -1]
+
+  const height = 2 * PADDING + BOX_HEIGHT * nClient + BOX_SPACE * (nClient - 1)
+  const width = 2 * PADDING + maxTagWidth + xPos[sortedTimestamps.at(-1)]
+  const svg = svgadd(document.querySelector('#canvas'), 'svg', {
+    width,
+    height,
+  })
+
+  // Draw background, etc.
+  const bg = svgadd(svg, 'g')
+  const bgRect = svgadd(bg, 'rect', {
+    height,
+    width,
+    x: 0,
+    y: 0,
+    class: 'bg',
+  })
+  bgRect.addEventListener('click', handleBgClick)
+  for (let i = 0; i < nClient; i++) {
+    const text = svgadd(bg, 'text', {
+      x: PADDING + maxTagWidth - BOX_TEXT_PADDING,
+      y: PADDING + BOX_HEIGHT / 2 + i * (BOX_HEIGHT + BOX_SPACE),
+      'text-anchor': 'end',
+    })
+    text.textContent = i < realClients ? i : sortedTags[i - realClients]
+  }
+
+  // Vertical line at t=0
+  svgadd(bg, 'line', {
+    x1: t0x,
+    y1: PADDING,
+    x2: t0x,
+    y2: height - PADDING,
+    class: 'divider',
+  })
+  // Horizontal line dividing clients from annotation tags, but only if there are tags
+  if (tags.size > 0) {
+    const annotationLineY = PADDING + realClients * (BOX_HEIGHT + BOX_SPACE) - BOX_SPACE / 2
+    svgadd(bg, 'line', {
+      x1: PADDING,
+      y1: annotationLineY,
+      x2: t0x,
+      y2: annotationLineY,
+      class: 'divider',
+    })
+  }
+
+  // Draw history
+  const historyLayers = []
+  const historyRects = []
+  const targetRects = svgnew('g')
+  for (const [partitionIndex, partition] of allData.entries()) {
+    const l = svgadd(svg, 'g')
+    historyLayers.push(l)
+    const rects = []
+    for (const [elementIndex, element] of partition.History.entries()) {
+      const g = svgadd(l, 'g')
+      const rx = xPos[element.Start]
+      const width = xPos[element.End] - rx
+      const x = rx + t0x
+      const y = PADDING + element.ClientId * (BOX_HEIGHT + BOX_SPACE)
+      const rectClass = element.Annotation ? 'client-annotation-rect' : 'history-rect'
+      rects.push(
+        svgadd(g, 'rect', {
+          height: BOX_HEIGHT,
+          width,
+          x,
+          y,
+          rx: HISTORY_RECT_RADIUS,
+          ry: HISTORY_RECT_RADIUS,
+          class: rectClass,
+          style:
+            element.Annotation && element.BackgroundColor.length > 0
+              ? `fill: ${element.BackgroundColor};`
+              : '',
+        })
+      )
+      const text = svgadd(g, 'text', {
+        x: x + width / 2,
+        y: y + BOX_HEIGHT / 2,
+        'text-anchor': 'middle',
+        class: 'history-text',
+        style:
+          element.Annotation && element.TextColor.length > 0 ? `fill: ${element.TextColor};` : '',
+      })
+      text.textContent = element.Description
+      // We don't add mouseTarget to g, but to targetRects, because we
+      // want to layer this on top of everything at the end; otherwise, the
+      // LPs and lines will be over the target, which will create holes
+      // where hover etc. won't work
+      const mouseTarget = svgadd(targetRects, 'rect', {
+        height: BOX_HEIGHT,
+        width,
+        x,
+        y,
+        class: 'target-rect',
+        'data-partition': partitionIndex,
+        'data-index': elementIndex,
+      })
+      mouseTarget.addEventListener('mouseover', handleMouseOver)
+      mouseTarget.addEventListener('mousemove', handleMouseMove)
+      mouseTarget.addEventListener('mouseout', handleMouseOut)
+      mouseTarget.addEventListener('click', handleClick)
+    }
+
+    historyRects.push(rects)
+  }
+
+  // Draw partial linearizations
+  const illegalLast = coreHistory.map((partition) => {
+    return partition.PartialLinearizations.map(() => new Set())
+  })
+  const largestIllegal = coreHistory.map(() => {
+    return {}
+  })
+  const largestIllegalLength = coreHistory.map(() => {
+    return {}
+  })
+  const partialLayers = []
+  const errorPoints = []
+  for (const [partitionIndex, partition] of coreHistory.entries()) {
+    const l = []
+    partialLayers.push(l)
+    for (const [linIndex, lin] of partition.PartialLinearizations.entries()) {
+      const g = svgadd(svg, 'g')
+      l.push(g)
+      let previousX = null
+      let previousY = null
+      let previousElement = null
+      const included = new Set()
+      for (const id of lin) {
+        const element = partition.History[id.Index]
+        const hereX = t0x + xPos[element.Start]
+        const x = previousX === null ? hereX : Math.max(hereX, previousX + EPSILON)
+        const y = PADDING + element.ClientId * (BOX_HEIGHT + BOX_SPACE) - LINE_BLEED
+        // Line from previous
+        if (previousElement !== null) {
+          svgadd(g, 'line', {
+            x1: previousX,
+            x2: x,
+            y1:
+              previousElement.ClientId >= element.ClientId
+                ? previousY
+                : previousY + BOX_HEIGHT + 2 * LINE_BLEED,
+            y2: previousElement.ClientId <= element.ClientId ? y : y + BOX_HEIGHT + 2 * LINE_BLEED,
+            class: 'linearization linearization-line',
+          })
+        }
+
+        // Current line
+        svgadd(g, 'line', {
+          x1: x,
+          x2: x,
+          y1: y,
+          y2: y + BOX_HEIGHT + 2 * LINE_BLEED,
+          class: 'linearization linearization-point',
+        })
+        previousX = x
+        previousY = y
+        previousElement = element
+        included.add(id.Index)
+      }
+
+      // Show possible but illegal next linearizations
+      // a history element is a possible next try
+      // if no other history element must be linearized earlier
+      // i.e. forall others, this.start < other.end
+      let minEnd = Infinity
+      for (const [index, element] of partition.History.entries()) {
+        if (!included.has(index)) {
+          minEnd = Math.min(minEnd, element.End)
+        }
+      }
+
+      for (const [index, element] of partition.History.entries()) {
+        if (!included.has(index) && element.Start < minEnd) {
+          const hereX = t0x + xPos[element.Start]
+          const x = previousX === null ? hereX : Math.max(hereX, previousX + EPSILON)
+          const y = PADDING + element.ClientId * (BOX_HEIGHT + BOX_SPACE) - LINE_BLEED
+          // Line from previous
+          svgadd(g, 'line', {
+            x1: previousX,
+            x2: x,
+            y1:
+              previousElement.ClientId >= element.ClientId
+                ? previousY
+                : previousY + BOX_HEIGHT + 2 * LINE_BLEED,
+            y2: previousElement.ClientId <= element.ClientId ? y : y + BOX_HEIGHT + 2 * LINE_BLEED,
+            class: 'linearization-invalid linearization-line',
+          })
+          // Current line
+          const point = svgadd(g, 'line', {
+            x1: x,
+            x2: x,
+            y1: y,
+            y2: y + BOX_HEIGHT + 2 * LINE_BLEED,
+            class: 'linearization-invalid linearization-point',
+          })
+          errorPoints.push({
+            x,
+            partition: partitionIndex,
+            index: lin.at(-1).Index, // NOTE not index
+            element: point,
+          })
+          illegalLast[partitionIndex][linIndex].add(index)
+          // eslint-disable-next-line max-depth
+          if (
+            !Object.hasOwn(largestIllegalLength[partitionIndex], index) ||
+            largestIllegalLength[partitionIndex][index] < lin.length
+          ) {
+            largestIllegalLength[partitionIndex][index] = lin.length
+            largestIllegal[partitionIndex][index] = linIndex
+          }
+        }
+      }
+    }
+  }
+
+  errorPoints.sort((a, b) => a.x - b.x)
+
+  // Attach targetRects
+  svgattach(svg, targetRects)
+
+  // Tooltip
+  // eslint-disable-next-line unicorn/prefer-dom-node-append
+  const tooltip = document.querySelector('#canvas').appendChild(document.createElement('div'))
+  tooltip.setAttribute('class', 'tooltip')
+
+  function handleMouseOver() {
+    if (!selected) {
+      const partition = Number.parseInt(this.dataset.partition, 10)
+      const index = Number.parseInt(this.dataset.index, 10)
+      highlight(partition, index)
+      tooltip.style.display = 'block'
+    }
+  }
+
+  function linearizationIndex(partition, index) {
+    // Show this linearization
+    if (partition >= coreHistory.length) {
+      // Annotation
+      return null
+    }
+
+    if (Object.hasOwn(coreHistory[partition].Largest, index)) {
+      return coreHistory[partition].Largest[index]
+    }
+
+    if (Object.hasOwn(largestIllegal[partition], index)) {
+      return largestIllegal[partition][index]
+    }
+
+    return null
+  }
+
+  function highlight(partition, index) {
+    // Hide all but this partition
+    for (const [i, layer] of historyLayers.entries()) {
+      if (i === partition) {
+        layer.classList.remove('hidden')
+      } else {
+        layer.classList.add('hidden')
+      }
+    }
+
+    // Hide all but the relevant linearization
+    for (const layer of partialLayers) {
+      for (const g of layer) {
+        g.classList.add('hidden')
+      }
+    }
+
+    // Show this linearization
+    const maxIndex = linearizationIndex(partition, index)
+    if (maxIndex !== null) {
+      partialLayers[partition][maxIndex].classList.remove('hidden')
+    }
+
+    updateJump()
+  }
+
+  let lastTooltip = [null, null, null, null, null]
+  function handleMouseMove(event_) {
+    // Keep tooltip static if selected
+    if (selected) {
+      return
+    }
+
+    const partition = Number.parseInt(this.dataset.partition, 10)
+    const index = Number.parseInt(this.dataset.index, 10)
+    const [sPartition, sIndex] = selectedIndex
+    const thisTooltip = [partition, index, selected, sPartition, sIndex]
+
+    if (!arrayEq(lastTooltip, thisTooltip)) {
+      // If selected, show info relevant to the selected linearization
+      const maxIndex = selected
+        ? linearizationIndex(sPartition, sIndex)
+        : linearizationIndex(partition, index)
+
+      if (partition >= coreHistory.length) {
+        // Annotation
+        const details = annotations[index].Details
+        tooltip.innerHTML = details.length === 0 ? '&langle;no details&rangle;' : details
+      } else if (selected && sPartition !== partition) {
+        tooltip.innerHTML = 'Not part of selected partition.'
+      } else if (maxIndex === null) {
+        tooltip.innerHTML = selected
+          ? 'Selected element is not part of any partial linearization.'
+          : 'Not part of any partial linearization.'
+      } else {
+        const lin = coreHistory[partition].PartialLinearizations[maxIndex]
+        let previous = null
+        let current = null
+        let found = false
+        for (const element of lin) {
+          previous = current
+          current = element
+          if (current.Index === index) {
+            found = true
+            break
+          }
+        }
+
+        const callTime = allData[partition].History[index].OriginalStart
+        const returnTime = allData[partition].History[index].OriginalEnd
+        let message = ''
+        if (found) {
+          // Part of linearization
+          if (previous !== null) {
+            message =
+              '<strong>Previous state:</strong><br>' + previous.StateDescription + '<br><br>'
+          }
+
+          message +=
+            '<strong>New state:</strong><br>' +
+            current.StateDescription +
+            '<br><br>Call: ' +
+            callTime +
+            '<br><br>Return: ' +
+            returnTime
+        } else if (illegalLast[partition][maxIndex].has(index)) {
+          // Illegal next one
+          message =
+            '<strong>Previous state:</strong><br>' +
+            lin.at(-1).StateDescription +
+            '<br><br><strong>New state:</strong><br>&langle;invalid op&rangle;' +
+            '<br><br>Call: ' +
+            callTime +
+            '<br><br>Return: ' +
+            returnTime
+        } else {
+          // Not part of this one
+          message = "Not part of selected element's partial linearization."
+        }
+
+        tooltip.innerHTML = message
+      }
+
+      lastTooltip = thisTooltip
+    }
+
+    // Make sure tooltip doesn't overflow off the right side of the screen
+    const maxX =
+      document.documentElement.scrollLeft +
+      document.documentElement.clientWidth -
+      PADDING -
+      tooltip.getBoundingClientRect().width
+    tooltip.style.left = Math.min(event_.pageX + 20, maxX) + 'px'
+    tooltip.style.top = event_.pageY + 20 + 'px'
+  }
+
+  function handleMouseOut() {
+    if (!selected) {
+      resetHighlight()
+      tooltip.style.display = 'none'
+      lastTooltip = [null, null, null, null, null]
+    }
+  }
+
+  function resetHighlight() {
+    // Show all layers
+    for (const layer of historyLayers) {
+      layer.classList.remove('hidden')
+    }
+
+    // Show longest linearizations, which are first
+    for (const layers of partialLayers) {
+      for (const [i, l] of layers.entries()) {
+        if (i === 0) {
+          l.classList.remove('hidden')
+        } else {
+          l.classList.add('hidden')
+        }
+      }
+    }
+
+    updateJump()
+  }
+
+  // Store jump click handler so we can remove it before adding a new one
+  let jumpClickHandler = null
+
+  function updateJump() {
+    const jump = document.querySelector('#jump-link')
+    // Find first non-hidden point
+    // feels a little hacky, but it works
+    const point = errorPoints.find((pt) => !pt.element.parentElement.classList.contains('hidden'))
+
+    // Remove any existing event listener
+    if (jumpClickHandler) {
+      jump.removeEventListener('click', jumpClickHandler)
+      jumpClickHandler = null
+    }
+
+    if (point) {
+      jump.classList.remove('inactive')
+      jumpClickHandler = () => {
+        point.element.scrollIntoView({behavior: 'smooth', inline: 'center', block: 'center'})
+        if (!selected) {
+          select(point.partition, point.index)
+        }
+      }
+
+      jump.addEventListener('click', jumpClickHandler)
+    } else {
+      jump.classList.add('inactive')
+    }
+  }
+
+  function handleClick(event_) {
+    const partition = Number.parseInt(this.dataset.partition, 10)
+    const index = Number.parseInt(this.dataset.index, 10)
+    if (selected) {
+      const [sPartition, sIndex] = selectedIndex
+      if (partition === sPartition && index === sIndex) {
+        deselect()
+        // Note: we're still displaying the tooltip, but once the user's mouse moves, it'll get updated
+        return
+      }
+
+      historyRects[sPartition][sIndex].classList.remove('selected')
+    }
+
+    select(partition, index)
+
+    tooltip.style.display = 'block'
+    // Set static tooltip position when selecting
+    const maxX =
+      document.documentElement.scrollLeft +
+      document.documentElement.clientWidth -
+      PADDING -
+      tooltip.getBoundingClientRect().width
+    tooltip.style.left = Math.min(event_.pageX + 20, maxX) + 'px'
+    tooltip.style.top = event_.pageY + 20 + 'px'
+  }
+
+  function handleBgClick() {
+    deselect()
+
+    tooltip.style.display = 'none'
+    lastTooltip = [null, null, null, null, null]
+  }
+
+  function select(partition, index) {
+    selected = true
+    selectedIndex = [partition, index]
+    highlight(partition, index)
+    historyRects[partition][index].classList.add('selected')
+  }
+
+  function deselect() {
+    if (!selected) {
+      return
+    }
+
+    selected = false
+    resetHighlight()
+    const [partition, index] = selectedIndex
+    historyRects[partition][index].classList.remove('selected')
+  }
+
+  handleMouseOut() // Initialize, same as mouse out
+}
+
+
+      const data = {"Partitions":[],"Annotations":[{"ClientId":0,"Tag":"$ Test Info","Start":0,"End":0,"Description":"Test (3D): install snapshots (disconnect) (3 servers)","Details":"Test (3D): install snapshots (disconnect) (3 servers)","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":100,"End":200,"Description":"agreement of 43233154 reached","Details":"checking agreement of 43233154 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":300,"End":400,"Description":"leader in term 1 = 2","Details":"checking for a single leader: leader in term 1 = 2","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":600,"End":700,"Description":"agreement of 22412889 reached","Details":"checking agreement of 22412889 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":800,"End":900,"Description":"submitting 9 commands to 2","Details":"submitting 9 commands to 2","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":1100,"End":1200,"Description":"snapshot created","Details":"snapshot created after applying the command at index 9","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":1300,"End":1400,"Description":"snapshot created","Details":"snapshot created after applying the command at index 9","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":1000,"End":1500,"Description":"agreement of 66804691 reached","Details":"checking agreement of 66804691 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":500,"End":1600,"Description":"partition = [0] [1 2]","Details":"partition = [0] [1 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":1700,"End":1800,"Description":"agreement of 12527883 reached","Details":"checking agreement of 12527883 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":1900,"End":2000,"Description":"leader in term 1 = 2","Details":"checking for a single leader: leader in term 1 = 2","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":2200,"End":2300,"Description":"agreement of 38029104 reached","Details":"checking agreement of 38029104 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":2400,"End":2500,"Description":"submitting 7 commands to 0","Details":"submitting 7 commands to 0","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":2600,"End":2700,"Description":"agreement of 68844096 reached","Details":"checking agreement of 68844096 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":2100,"End":2800,"Description":"partition = [2] [0 1]","Details":"partition = [2] [0 1]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":2900,"End":3000,"Description":"agreement of 15012866 reached","Details":"checking agreement of 15012866 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":3100,"End":3200,"Description":"leader in term 2 = 1","Details":"checking for a single leader: leader in term 2 = 1","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":3400,"End":3500,"Description":"agreement of 96750974 reached","Details":"checking agreement of 96750974 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":3600,"End":3700,"Description":"submitting 11 commands to 1","Details":"submitting 11 commands to 1","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":3900,"End":4000,"Description":"snapshot created","Details":"snapshot created after applying the command at index 19","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":4100,"End":4200,"Description":"snapshot created","Details":"snapshot created after applying the command at index 19","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":4300,"End":4400,"Description":"snapshot created","Details":"snapshot created after applying the command at index 29","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":4500,"End":4600,"Description":"snapshot created","Details":"snapshot created after applying the command at index 29","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":3800,"End":4700,"Description":"agreement of 49225397 reached","Details":"checking agreement of 49225397 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":3300,"End":4800,"Description":"partition = [2] [0 1]","Details":"partition = [2] [0 1]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":4900,"End":5000,"Description":"agreement of 53321501 reached","Details":"checking agreement of 53321501 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":5100,"End":5200,"Description":"leader in term 2 = 1","Details":"checking for a single leader: leader in term 2 = 1","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":5400,"End":5500,"Description":"agreement of 62253510 reached","Details":"checking agreement of 62253510 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":5600,"End":5700,"Description":"submitting 7 commands to 1","Details":"submitting 7 commands to 1","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":5900,"End":6000,"Description":"snapshot created","Details":"snapshot created after applying the command at index 39","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":6100,"End":6200,"Description":"snapshot created","Details":"snapshot created after applying the command at index 39","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":5800,"End":6300,"Description":"agreement of 29867321 reached","Details":"checking agreement of 29867321 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":5300,"End":6400,"Description":"partition = [2] [0 1]","Details":"partition = [2] [0 1]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":6500,"End":6600,"Description":"agreement of 82660069 reached","Details":"checking agreement of 82660069 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":6700,"End":6800,"Description":"leader in term 4 = 1","Details":"checking for a single leader: leader in term 4 = 1","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":7000,"End":7100,"Description":"agreement of 13225937 reached","Details":"checking agreement of 13225937 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":7200,"End":7300,"Description":"submitting 11 commands to 2","Details":"submitting 11 commands to 2","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":7500,"End":7600,"Description":"snapshot created","Details":"snapshot created after applying the command at index 49","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":7700,"End":7800,"Description":"snapshot created","Details":"snapshot created after applying the command at index 49","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":7400,"End":7900,"Description":"agreement of 89251405 reached","Details":"checking agreement of 89251405 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":6900,"End":8000,"Description":"partition = [1] [0 2]","Details":"partition = [1] [0 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":8100,"End":8200,"Description":"agreement of 40756678 reached","Details":"checking agreement of 40756678 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":8300,"End":8400,"Description":"leader in term 13 = 2","Details":"checking for a single leader: leader in term 13 = 2","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":8600,"End":8700,"Description":"agreement of 45827546 reached","Details":"checking agreement of 45827546 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":8800,"End":8900,"Description":"submitting 14 commands to 2","Details":"submitting 14 commands to 2","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":9100,"End":9200,"Description":"snapshot created","Details":"snapshot created after applying the command at index 59","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":9300,"End":9400,"Description":"snapshot created","Details":"snapshot created after applying the command at index 69","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":9500,"End":9600,"Description":"snapshot created","Details":"snapshot created after applying the command at index 59","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":9700,"End":9800,"Description":"snapshot created","Details":"snapshot created after applying the command at index 69","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":9000,"End":9900,"Description":"agreement of 48730718 reached","Details":"checking agreement of 48730718 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":8500,"End":10000,"Description":"partition = [0] [1 2]","Details":"partition = [0] [1 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":10100,"End":10200,"Description":"agreement of 36570795 reached","Details":"checking agreement of 36570795 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":10300,"End":10400,"Description":"leader in term 13 = 2","Details":"checking for a single leader: leader in term 13 = 2","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":10600,"End":10700,"Description":"agreement of 42074561 reached","Details":"checking agreement of 42074561 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":10800,"End":10900,"Description":"submitting 10 commands to 2","Details":"submitting 10 commands to 2","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":11100,"End":11200,"Description":"snapshot created","Details":"snapshot created after applying the command at index 79","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":11300,"End":11400,"Description":"snapshot created","Details":"snapshot created after applying the command at index 79","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":11000,"End":11500,"Description":"agreement of 48770635 reached","Details":"checking agreement of 48770635 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":10500,"End":11600,"Description":"partition = [0] [1 2]","Details":"partition = [0] [1 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":11700,"End":11800,"Description":"agreement of 35309136 reached","Details":"checking agreement of 35309136 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":11900,"End":12000,"Description":"leader in term 13 = 2","Details":"checking for a single leader: leader in term 13 = 2","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":12200,"End":12300,"Description":"agreement of 37470745 reached","Details":"checking agreement of 37470745 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":12400,"End":12500,"Description":"submitting 13 commands to 0","Details":"submitting 13 commands to 0","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":12600,"End":12700,"Description":"agreement of 47700735 reached","Details":"checking agreement of 47700735 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":12100,"End":12800,"Description":"partition = [2] [0 1]","Details":"partition = [2] [0 1]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":12900,"End":13000,"Description":"agreement of 76903829 reached","Details":"checking agreement of 76903829 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":13100,"End":13200,"Description":"leader in term 14 = 1","Details":"checking for a single leader: leader in term 14 = 1","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":13500,"End":13600,"Description":"snapshot created","Details":"snapshot created after applying the command at index 89","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":13700,"End":13800,"Description":"snapshot created","Details":"snapshot created after applying the command at index 89","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":13400,"End":13900,"Description":"agreement of 44791416 reached","Details":"checking agreement of 44791416 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":14000,"End":14100,"Description":"submitting 11 commands to 1","Details":"submitting 11 commands to 1","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":14300,"End":14400,"Description":"snapshot created","Details":"snapshot created after applying the command at index 99","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":14500,"End":14600,"Description":"snapshot created","Details":"snapshot created after applying the command at index 99","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":14200,"End":14700,"Description":"agreement of 91368102 reached","Details":"checking agreement of 91368102 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":13300,"End":14800,"Description":"partition = [2] [0 1]","Details":"partition = [2] [0 1]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":14900,"End":15000,"Description":"agreement of 52072806 reached","Details":"checking agreement of 52072806 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":15100,"End":15200,"Description":"leader in term 14 = 1","Details":"checking for a single leader: leader in term 14 = 1","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":15400,"End":15500,"Description":"agreement of 73818608 reached","Details":"checking agreement of 73818608 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":15600,"End":15700,"Description":"submitting 8 commands to 1","Details":"submitting 8 commands to 1","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":15900,"End":16000,"Description":"snapshot created","Details":"snapshot created after applying the command at index 109","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":16100,"End":16200,"Description":"snapshot created","Details":"snapshot created after applying the command at index 109","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":15800,"End":16300,"Description":"agreement of 77628886 reached","Details":"checking agreement of 77628886 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":15300,"End":16400,"Description":"partition = [2] [0 1]","Details":"partition = [2] [0 1]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":16500,"End":16600,"Description":"agreement of 62389963 reached","Details":"checking agreement of 62389963 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":16700,"End":16800,"Description":"leader in term 14 = 1","Details":"checking for a single leader: leader in term 14 = 1","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":17000,"End":17100,"Description":"agreement of 56518716 reached","Details":"checking agreement of 56518716 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":17200,"End":17300,"Description":"submitting 10 commands to 2","Details":"submitting 10 commands to 2","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":17500,"End":17600,"Description":"snapshot created","Details":"snapshot created after applying the command at index 119","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":17700,"End":17800,"Description":"snapshot created","Details":"snapshot created after applying the command at index 119","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":17400,"End":17900,"Description":"agreement of 46823074 reached","Details":"checking agreement of 46823074 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":16900,"End":18000,"Description":"partition = [1] [0 2]","Details":"partition = [1] [0 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":18100,"End":18200,"Description":"agreement of 22613382 reached","Details":"checking agreement of 22613382 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":18300,"End":18400,"Description":"leader in term 20 = 2","Details":"checking for a single leader: leader in term 20 = 2","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":18600,"End":18700,"Description":"agreement of 91032225 reached","Details":"checking agreement of 91032225 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":18800,"End":18900,"Description":"submitting 12 commands to 2","Details":"submitting 12 commands to 2","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":19100,"End":19200,"Description":"snapshot created","Details":"snapshot created after applying the command at index 129","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":19300,"End":19400,"Description":"snapshot created","Details":"snapshot created after applying the command at index 129","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":19500,"End":19600,"Description":"snapshot created","Details":"snapshot created after applying the command at index 139","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":19700,"End":19800,"Description":"snapshot created","Details":"snapshot created after applying the command at index 139","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":19000,"End":19900,"Description":"agreement of 58252010 reached","Details":"checking agreement of 58252010 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":18500,"End":20000,"Description":"partition = [0] [1 2]","Details":"partition = [0] [1 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":20100,"End":20200,"Description":"agreement of 34283617 reached","Details":"checking agreement of 34283617 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":20300,"End":20400,"Description":"leader in term 20 = 2","Details":"checking for a single leader: leader in term 20 = 2","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":20600,"End":20700,"Description":"agreement of 65341936 reached","Details":"checking agreement of 65341936 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":20800,"End":20900,"Description":"submitting 12 commands to 2","Details":"submitting 12 commands to 2","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":21100,"End":21200,"Description":"snapshot created","Details":"snapshot created after applying the command at index 149","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":21300,"End":21400,"Description":"snapshot created","Details":"snapshot created after applying the command at index 149","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":21000,"End":21500,"Description":"agreement of 38353821 reached","Details":"checking agreement of 38353821 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":20500,"End":21600,"Description":"partition = [0] [1 2]","Details":"partition = [0] [1 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":21700,"End":21800,"Description":"agreement of 48294429 reached","Details":"checking agreement of 48294429 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":21900,"End":22000,"Description":"leader in term 20 = 2","Details":"checking for a single leader: leader in term 20 = 2","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":22200,"End":22300,"Description":"agreement of 38364216 reached","Details":"checking agreement of 38364216 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":22400,"End":22500,"Description":"submitting 5 commands to 0","Details":"submitting 5 commands to 0","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":22700,"End":22800,"Description":"snapshot created","Details":"snapshot created after applying the command at index 159","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":22900,"End":23000,"Description":"snapshot created","Details":"snapshot created after applying the command at index 159","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":22600,"End":23100,"Description":"agreement of 21340431 reached","Details":"checking agreement of 21340431 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":22100,"End":23200,"Description":"partition = [2] [0 1]","Details":"partition = [2] [0 1]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":23300,"End":23400,"Description":"agreement of 35685432 reached","Details":"checking agreement of 35685432 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":23500,"End":23600,"Description":"leader in term 22 = 0","Details":"checking for a single leader: leader in term 22 = 0","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":23800,"End":23900,"Description":"agreement of 54404182 reached","Details":"checking agreement of 54404182 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":24000,"End":24100,"Description":"submitting 7 commands to 0","Details":"submitting 7 commands to 0","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":24300,"End":24400,"Description":"snapshot created","Details":"snapshot created after applying the command at index 169","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":24500,"End":24600,"Description":"snapshot created","Details":"snapshot created after applying the command at index 169","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":24200,"End":24700,"Description":"agreement of 65577302 reached","Details":"checking agreement of 65577302 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":23700,"End":24800,"Description":"partition = [1] [0 2]","Details":"partition = [1] [0 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":24900,"End":25000,"Description":"agreement of 44196422 reached","Details":"checking agreement of 44196422 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":25100,"End":25200,"Description":"leader in term 22 = 0","Details":"checking for a single leader: leader in term 22 = 0","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":25400,"End":25500,"Description":"agreement of 35426946 reached","Details":"checking agreement of 35426946 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":25600,"End":25700,"Description":"submitting 8 commands to 0","Details":"submitting 8 commands to 0","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":25900,"End":26000,"Description":"snapshot created","Details":"snapshot created after applying the command at index 179","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":26100,"End":26200,"Description":"snapshot created","Details":"snapshot created after applying the command at index 179","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":25800,"End":26300,"Description":"agreement of 55077946 reached","Details":"checking agreement of 55077946 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":25300,"End":26400,"Description":"partition = [1] [0 2]","Details":"partition = [1] [0 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":26500,"End":26600,"Description":"agreement of 71231929 reached","Details":"checking agreement of 71231929 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":26700,"End":26800,"Description":"leader in term 22 = 0","Details":"checking for a single leader: leader in term 22 = 0","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":27000,"End":27100,"Description":"agreement of 10863073 reached","Details":"checking agreement of 10863073 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":27200,"End":27300,"Description":"submitting 7 commands to 1","Details":"submitting 7 commands to 1","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":27400,"End":27500,"Description":"agreement of 31755615 reached","Details":"checking agreement of 31755615 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":26900,"End":27600,"Description":"partition = [0] [1 2]","Details":"partition = [0] [1 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":27700,"End":27800,"Description":"agreement of 39753579 reached","Details":"checking agreement of 39753579 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":27900,"End":28000,"Description":"leader in term 23 = 2","Details":"checking for a single leader: leader in term 23 = 2","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":28300,"End":28400,"Description":"snapshot created","Details":"snapshot created after applying the command at index 189","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":28500,"End":28600,"Description":"snapshot created","Details":"snapshot created after applying the command at index 189","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":28200,"End":28700,"Description":"agreement of 11869735 reached","Details":"checking agreement of 11869735 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":28800,"End":28900,"Description":"submitting 12 commands to 2","Details":"submitting 12 commands to 2","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":29100,"End":29200,"Description":"snapshot created","Details":"snapshot created after applying the command at index 199","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":29300,"End":29400,"Description":"snapshot created","Details":"snapshot created after applying the command at index 199","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":29000,"End":29500,"Description":"agreement of 56033615 reached","Details":"checking agreement of 56033615 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":28100,"End":29600,"Description":"partition = [0] [1 2]","Details":"partition = [0] [1 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":29700,"End":29800,"Description":"agreement of 68852155 reached","Details":"checking agreement of 68852155 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":29900,"End":30000,"Description":"leader in term 23 = 2","Details":"checking for a single leader: leader in term 23 = 2","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":30200,"End":30300,"Description":"agreement of 77654320 reached","Details":"checking agreement of 77654320 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":30400,"End":30500,"Description":"submitting 5 commands to 2","Details":"submitting 5 commands to 2","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":30700,"End":30800,"Description":"snapshot created","Details":"snapshot created after applying the command at index 209","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":30900,"End":31000,"Description":"snapshot created","Details":"snapshot created after applying the command at index 209","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":30600,"End":31100,"Description":"agreement of 13767395 reached","Details":"checking agreement of 13767395 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":30100,"End":31200,"Description":"partition = [0] [1 2]","Details":"partition = [0] [1 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":31300,"End":31400,"Description":"agreement of 72382423 reached","Details":"checking agreement of 72382423 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":31500,"End":31600,"Description":"leader in term 23 = 2","Details":"checking for a single leader: leader in term 23 = 2","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":31800,"End":31900,"Description":"agreement of 73247247 reached","Details":"checking agreement of 73247247 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":32000,"End":32100,"Description":"submitting 7 commands to 0","Details":"submitting 7 commands to 0","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":32200,"End":32300,"Description":"agreement of 30936587 reached","Details":"checking agreement of 30936587 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":31700,"End":32400,"Description":"partition = [2] [0 1]","Details":"partition = [2] [0 1]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":32500,"End":32600,"Description":"agreement of 75744164 reached","Details":"checking agreement of 75744164 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":32700,"End":32800,"Description":"leader in term 25 = 1","Details":"checking for a single leader: leader in term 25 = 1","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":33000,"End":33100,"Description":"agreement of 10880391 reached","Details":"checking agreement of 10880391 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":33200,"End":33300,"Description":"submitting 8 commands to 1","Details":"submitting 8 commands to 1","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":33500,"End":33600,"Description":"snapshot created","Details":"snapshot created after applying the command at index 219","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":33700,"End":33800,"Description":"snapshot created","Details":"snapshot created after applying the command at index 219","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":33400,"End":33900,"Description":"agreement of 49132789 reached","Details":"checking agreement of 49132789 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":32900,"End":34000,"Description":"partition = [2] [0 1]","Details":"partition = [2] [0 1]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":34100,"End":34200,"Description":"agreement of 56852205 reached","Details":"checking agreement of 56852205 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":34300,"End":34400,"Description":"leader in term 25 = 1","Details":"checking for a single leader: leader in term 25 = 1","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":34600,"End":34700,"Description":"agreement of 45825606 reached","Details":"checking agreement of 45825606 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":34800,"End":34900,"Description":"submitting 11 commands to 1","Details":"submitting 11 commands to 1","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":35100,"End":35200,"Description":"snapshot created","Details":"snapshot created after applying the command at index 229","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":35300,"End":35400,"Description":"snapshot created","Details":"snapshot created after applying the command at index 229","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":35000,"End":35500,"Description":"agreement of 55676397 reached","Details":"checking agreement of 55676397 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":34500,"End":35600,"Description":"partition = [2] [0 1]","Details":"partition = [2] [0 1]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Test Info","Start":35800,"End":35900,"Description":"snapshot created","Details":"snapshot created after applying the command at index 239","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Test Info","Start":36000,"End":36100,"Description":"snapshot created","Details":"snapshot created after applying the command at index 239","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":35700,"End":36200,"Description":"agreement of 18355413 reached","Details":"checking agreement of 18355413 by at least 3 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":36300,"End":36400,"Description":"leader in term 27 = 1","Details":"checking for a single leader: leader in term 27 = 1","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Checker","Start":36600,"End":36700,"Description":"agreement of 70413895 reached","Details":"checking agreement of 70413895 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Test Info","Start":36800,"End":36900,"Description":"submitting 9 commands to 2","Details":"submitting 9 commands to 2","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"},{"ClientId":0,"Tag":"$ Checker","Start":37000,"End":37100,"Description":"agreement of 60970357 reached","Details":"checking agreement of 60970357 by at least 2 servers with retry: OK","Annotation":true,"TextColor":"","BackgroundColor":"#C8E6C9"},{"ClientId":0,"Tag":"$ Failure","Start":36500,"End":37200,"Description":"partition = [1] [0 2]","Details":"partition = [1] [0 2]","Annotation":true,"TextColor":"","BackgroundColor":"#B3E5FC"},{"ClientId":0,"Tag":"$ Checker","Start":37300,"End":37400,"Description":"apply error","Details":"checking agreement of 26322119 by at least 3 servers with retry: commit index=240 server=1 2632211997290008374 != server=2 7041389597843824518","Annotation":true,"TextColor":"","BackgroundColor":"#FFCDD2"},{"ClientId":0,"Tag":"$ Test Info","Start":37500,"End":37500,"Description":"test failed","Details":"test failed","Annotation":true,"TextColor":"","BackgroundColor":"#FAFAFA"}]}
+
+      render(data)
+    </script>
+  </body>
+</html>
