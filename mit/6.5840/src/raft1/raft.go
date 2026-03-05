@@ -100,8 +100,8 @@ type RaftState struct {
 	CurrentTerm int
 	VotedFor    int
 	Log         []LogEntry
-	// 3D: snapshot metadata persisted with raft state so that
-	// the raw snapshot bytes can be stored separately by Persister
+	// 3D: snapshot metadata persisted with raft state so that the raw snapshot bytes can be stored separately by Persister
+	// looks like tests are decoding raw snapshot from persister, so no user type allowed there
 	LastIncludedIndex int
 	LastIncludedTerm  int
 }
@@ -122,7 +122,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 
-	// Your initialization code here (3A, 3B, 3C).
 	// 3A
 	rf.peerState = Follower
 	rf.votedFor = votedForNone
@@ -156,7 +155,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	DPrintf("Raft instance%d started", rf.me)
 	DPrintf("Raft instance%d init state: lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
-	rf.printLog()
+	//rf.printLog()
 
 	return rf
 }
@@ -306,7 +305,7 @@ func (rf *Raft) handleInstallSnapshot(leaderTerm int, lastIncludedIndex int, las
 			rf.persist()
 
 			DPrintf("Raft instance%d agreed with snapshot lastIncludedIndex=%d lastIncludedTerm=%d", rf.me, lastIncludedIndex, lastIncludedTerm)
-			rf.printLog()
+			//rf.printLog()
 			// If this snapshot advances what the follower has applied, apply it
 			if rf.lastApplied < rf.lastIncludedIndexInSnapshot {
 				rf.applySnapshot()
@@ -354,35 +353,35 @@ func (rf *Raft) startLogApply() {
 		if rf.lastApplied < rf.lastIncludedIndexInSnapshot { // restore after reboot
 			rf.applySnapshot() // TODO probably do 1 time on reboot
 		}
+		rf.mu.Unlock()
+
+		applyMsg := raftapi.ApplyMsg{CommandValid: true}
+
+		rf.mu.Lock()
 		// "If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)"
-		if rf.commitIndex > rf.lastApplied {
+		applyLog := rf.commitIndex > rf.lastApplied
+		if applyLog {
 			rf.lastApplied++
+			// absToLocal() could return negative index if lastApplied is inside snapshot, but here lastApplied cannot be inside previous snapshot
 			lastAppliedLocal := rf.absToLocal(rf.lastApplied)
 			if lastAppliedLocal < 0 {
 				DPrintf("Raft instance%d unexpected lastAppliedLocal=%d. rf.lastApplied=%d, rf.lastIncludedIndexInSnapshot=%d", rf.me, lastAppliedLocal, rf.lastApplied, rf.lastIncludedIndexInSnapshot)
-				rf.printLog()
+				//rf.printLog()
 			}
-			// Prepare apply message and send it without holding rf.mu to avoid
-			// blocking the Raft lock while the service processes the command.
-			cmd := rf.log[lastAppliedLocal].Command
-			cmdIndex := rf.lastApplied + 1
-			rf.mu.Unlock()
+			applyMsg.Command = rf.log[lastAppliedLocal].Command
+			applyMsg.CommandIndex = rf.lastApplied + 1 // pretend 1-indexed. If not, tests fail with "one(100) failed to reach agreement" or "got index 0 but expected 1": 1 is hardcoded in tests
+		}
+		rf.mu.Unlock()
 
-			// apply outside lock for performance
-			rf.applyCh <- raftapi.ApplyMsg{
-				CommandValid: true,
-				// absToLocal() could return negative index if lastApplied is inside snapshot, but here lastApplied cannot be inside previous snapshot
-				Command: cmd,
-				// pretend 1-indexed. If not, tests fail with "one(100) failed to reach agreement" or "got index 0 but expected 1": 1 is hardcoded in tests
-				CommandIndex: cmdIndex,
-			}
+		if applyLog {
+			// channels are sync: if apply inside lock, all other threads that acquire this lock will wait for the subscriber (client) to get the message out.
+			// instead apply outside lock so only apply thread is blocked until client gets the message out of the channel.
+			rf.applyCh <- applyMsg
 
 			//rf.mu.Lock()
 			//DPrintf("Raft instance%d has applied command at log index=%d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, rf.lastApplied, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
 			//rf.printLog()
 			//rf.mu.Unlock()
-		} else {
-			rf.mu.Unlock() // TODO refactor
 		}
 		time.Sleep(time.Duration(applyEntriesPeriodicityMs) * time.Millisecond)
 	}
@@ -415,7 +414,7 @@ func (rf *Raft) startLogReplicationAndHeartbeats() {
 				ok, commitIndex := rf.increaseCommitIndexOnLeader() // increase commitIndex if quorum achieved
 				if ok {
 					DPrintf("Raft instance%d (Leader) increased commitIndex from %d to %d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, rf.commitIndex, commitIndex, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
-					rf.printLog()
+					//rf.printLog()
 				}
 			} else {
 				// if not success, decrease nextIndex: find index where leader and follower agree on their logs
@@ -582,7 +581,7 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 	}
 	rf.resetHeartbeatTimeout() // reset only after term check: ignore heartbeats from zombie leaders
 	if rf.increaseTerm(leaderTerm) {
-		//DPrintf("Raft instance%d detected higher term %d while handling heartbeat. Converting to follower", rf.me, leaderTerm)
+		DPrintf("Raft instance%d detected higher term %d while handling heartbeat. Converting to follower", rf.me, leaderTerm)
 	}
 	// "2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)"
 	if !rf.isLogConsistentWithLeader(prevLogIndex, prevLogTerm) {
@@ -616,7 +615,7 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 	oldCommitIndex := rf.commitIndex
 	if rf.increaseCommitIndexOnFollower(leaderCommit, prevLogIndex, len(newEntries)) {
 		DPrintf("Raft instance%d (Follower) commitIndex=%d leaderCommit=%d. Increasing commitIndex from %d to %d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, rf.commitIndex, leaderCommit, oldCommitIndex, rf.commitIndex, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
-		rf.printLog()
+		//rf.printLog()
 	}
 
 	return true, xterm, xindex, xlen
@@ -624,9 +623,6 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 
 // Consistency Check on follower
 func (rf *Raft) isLogConsistentWithLeader(prevLogIndex int, prevLogTerm int) bool {
-
-	// ! Rewritten. Could contain bugs. Needs to test separately in 3A-3C.
-
 	// if prevLogIndex == -1 then the very first entry at index 0 is being sent, or log is empty. -1 passes Consistency Check
 	if prevLogIndex < 0 {
 		return true
@@ -781,7 +777,7 @@ func (rf *Raft) appentNewEntries(newEntriesIndex int, newEntries []LogEntryApiMo
 		appendedCount++
 	}
 	if appendedCount > 0 {
-		rf.printLog()
+		//rf.printLog()
 	}
 }
 
@@ -797,20 +793,16 @@ func (rf *Raft) increaseCommitIndexOnLeader() (ok bool, newCommitIndex int) {
 	commitIndex := matchIndexSorted[len(matchIndexSorted)-rf.majority] // leader's matchIndex is now taken into account
 
 	// 3D: current commitIndex could be inside snapshot, in this case it always equals to lastIncludedIndex: snapshot contains only committed records.
-	//   New commitIndex is always greater than current commitIndex, so it's always outside snapshot.
-	if (commitIndex >= 0) && (commitIndex > rf.commitIndex) {
-		// Ensure commitIndex points to an entry that exists in the leader's
-		// in-memory log (i.e. not inside a snapshot). absToLocal may return
-		// a negative index when the entry is inside the snapshot; in that
-		// case we must not try to access rf.log and should not advance the
-		// commit index based on that value.
-		localIdx := rf.absToLocal(commitIndex)
-		if localIdx < 0 || localIdx >= len(rf.log) {
+	if (commitIndex >= 0) && (commitIndex > rf.commitIndex) && (rf.log[rf.absToLocal(commitIndex)].Term == rf.currentTerm) {
+		commitIndexLocal := rf.absToLocal(commitIndex)
+		// absToLocal() could return negative if index is inside snapshot,
+		// probably here on leader it cannot actually, because new commitIndex is always greater than current commitIndex, so it's always outside snapshot,
+		// but check anyway
+		if (commitIndexLocal < 0) || (commitIndexLocal >= len(rf.log)) {
 			return false, -1
 		}
-		if rf.log[localIdx].Term == rf.currentTerm {
-			DPrintf("Raft instance%d (Leader) increasing commitIndex from %d to %d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, rf.commitIndex, commitIndex, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
-			rf.printLog()
+		if rf.log[commitIndexLocal].Term == rf.currentTerm {
+			DPrintf("Raft instance%d (Leader) increasing commitIndex from %d to %d", rf.me, rf.commitIndex, commitIndex)
 			rf.commitIndex = commitIndex
 			return true, commitIndex
 		}
@@ -833,10 +825,9 @@ func (rf *Raft) increaseCommitIndexOnFollower(leaderCommit int, prevLogIndex int
 			lastNewEntryIndex := prevLogIndex + newEntriesCount
 			rf.commitIndex = min(leaderCommit, lastNewEntryIndex)
 		} else {
-			// heartbeat
-			//rf.commitIndex = min(leaderCommit, rf.getAbsLogLen()-1) // ?
-			// Follower log could contain crap after prevLogIndex on which it passed consistency check.
-			// So we must not increase commit index above prevLogIndex on heartbeat and must wait until real entries are passed and the log is synchronized.
+			// Heartbeat
+			// follower log could contain crap after prevLogIndex on which it passed consistency check.
+			// so we must not increase commit index above prevLogIndex on heartbeat and must wait until real entries are passed and the log is synchronized.
 			rf.commitIndex = min(leaderCommit, prevLogIndex, rf.getAbsLogLen()-1)
 		}
 		return true
@@ -1146,7 +1137,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 	rf.mu.Lock()
 	reply.VoteGranted = rf.voteForCandidate(args.CandidateId, args.Term, args.LastLogIndex, args.LastLogTerm)
-	reply.Term = rf.currentTerm
+	// TODO return new term from handler
+	reply.Term = rf.currentTerm // set reply term after handing because term could have been increased there
 	DPrintf("Raft instance%d processed RequestVote from id=%d. currentTerm=%d votedFor=%d. Result: voteGranted=%v", rf.me, args.CandidateId, rf.currentTerm, rf.votedFor, reply.VoteGranted)
 	rf.mu.Unlock()
 }
@@ -1158,8 +1150,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		panic(fmt.Sprintf("received AppendEntries from self id=%d", rf.me))
 	}
 	rf.mu.Lock()
-	// Handle the AppendEntries; handleAppendEntries may call increaseTerm and change rf.currentTerm,
-	// so set reply.Term after handling to ensure the RPC reply reflects the updated term.
 	reply.Success, reply.XTerm, reply.XIndex, reply.XLen = rf.handleAppendEntries(args.Term, args.LeaderCommit, args.PrevLogIndex, args.PrevLogTerm, args.Entries) // 3B: log == nil: heartbeat
 	reply.Term = rf.currentTerm
 	rf.mu.Unlock()
@@ -1168,9 +1158,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 // InstallSnapshot RPC handler
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.mu.Lock()
-	// Handle the snapshot which may update currentTerm / convert to follower.
 	rf.handleInstallSnapshot(args.Term, args.LastIncludedIndex, args.LastIncludedTerm, args.Data)
-	// Ensure reply.Term reflects the (possibly updated) currentTerm after handling.
 	reply.Term = rf.currentTerm
 	rf.mu.Unlock()
 }
@@ -1266,7 +1254,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Unlock()
 
 	if isLeader {
-		go rf.sendAppendEntriesToPeers()
+		go rf.sendAppendEntriesToPeers() // don't wait for the AppendEntries work loop timeout to elapse
 	}
 	return index, term, isLeader
 }
@@ -1280,7 +1268,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	index -= 1 // ! TODO index could be 1-based!
 	DPrintf("Raft instance%d Snapshot call with index=%d (1-indexed)", rf.me, index)
-	rf.printLog()
+	//rf.printLog()
 	if index > rf.lastIncludedIndexInSnapshot {
 		localIndex := rf.absToLocal(index) // hope index is global
 		// 3D: if absToLocal(i) returns index < 0 means that i is inside snapshot, but here it's impossible
@@ -1294,10 +1282,8 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 		rf.log = rf.log[localIndex+1:] // shrink log
 
 		DPrintf("Raft instance%d applied snapshot. lastIncludedIndexInSnapshot=%d (0-indexed), lastIncludedTermInSnapshot=%d", rf.me, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
-		rf.printLog()
+		//rf.printLog()
 
-		// Persist raft state and the raw snapshot bytes separately.
-		// raft state contains snapshot metadata (last included index/term)
 		rf.persist()
 	}
 
@@ -1319,7 +1305,7 @@ func (rf *Raft) GetState() (int, bool) {
 
 	var term int
 	var isleader bool
-	// Your code here (3A).
+	// 3A
 	rf.mu.Lock()
 	term = rf.currentTerm
 	isleader = rf.peerState == Leader

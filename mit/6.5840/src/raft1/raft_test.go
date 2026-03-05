@@ -1297,95 +1297,95 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 	}
 }
 
-// func TestSnapshotBasic3D(t *testing.T) {
-// 	snapcommon(t, "Test (3D): snapshots basic", false, true, false)
-// }
+func TestSnapshotBasic3D(t *testing.T) {
+	snapcommon(t, "Test (3D): snapshots basic", false, true, false)
+}
 
-// func TestSnapshotInstall3D(t *testing.T) {
-// 	snapcommon(t, "Test (3D): install snapshots (disconnect)", true, true, false)
-// }
+func TestSnapshotInstall3D(t *testing.T) {
+	snapcommon(t, "Test (3D): install snapshots (disconnect)", true, true, false)
+}
 
 func TestSnapshotInstallUnreliable3D(t *testing.T) {
 	snapcommon(t, "Test (3D): install snapshots (disconnect)",
 		true, false, false)
 }
 
-// func TestSnapshotInstallCrash3D(t *testing.T) {
-// 	snapcommon(t, "Test (3D): install snapshots (crash)", false, true, true)
-// }
+func TestSnapshotInstallCrash3D(t *testing.T) {
+	snapcommon(t, "Test (3D): install snapshots (crash)", false, true, true)
+}
 
-// func TestSnapshotInstallUnCrash3D(t *testing.T) {
-// 	snapcommon(t, "Test (3D): install snapshots (crash)", false, false, true)
-// }
+func TestSnapshotInstallUnCrash3D(t *testing.T) {
+	snapcommon(t, "Test (3D): install snapshots (crash)", false, false, true)
+}
 
-// // do the servers persist the snapshots, and
-// // restart using snapshot along with the
-// // tail of the log?
-// func TestSnapshotAllCrash3D(t *testing.T) {
-// 	servers := 3
-// 	iters := 5
-// 	ts := makeTest(t, servers, false, true)
-// 	defer ts.cleanup()
+// do the servers persist the snapshots, and
+// restart using snapshot along with the
+// tail of the log?
+func TestSnapshotAllCrash3D(t *testing.T) {
+	servers := 3
+	iters := 5
+	ts := makeTest(t, servers, false, true)
+	defer ts.cleanup()
 
-// 	tester.AnnotateTest("TestSnapshotAllCrash3D", servers)
-// 	ts.Begin("Test (3D): crash and restart all servers")
+	tester.AnnotateTest("TestSnapshotAllCrash3D", servers)
+	ts.Begin("Test (3D): crash and restart all servers")
 
-// 	ts.one(rand.Int(), servers, true)
+	ts.one(rand.Int(), servers, true)
 
-// 	for i := 0; i < iters; i++ {
-// 		// perhaps enough to get a snapshot
-// 		nn := (SnapShotInterval / 2) + (rand.Int() % SnapShotInterval)
-// 		for i := 0; i < nn; i++ {
-// 			ts.one(rand.Int(), servers, true)
-// 		}
+	for i := 0; i < iters; i++ {
+		// perhaps enough to get a snapshot
+		nn := (SnapShotInterval / 2) + (rand.Int() % SnapShotInterval)
+		for i := 0; i < nn; i++ {
+			ts.one(rand.Int(), servers, true)
+		}
 
-// 		index1 := ts.one(rand.Int(), servers, true)
+		index1 := ts.one(rand.Int(), servers, true)
 
-// 		// crash all
-// 		ts.g.Shutdown()
-// 		tester.AnnotateShutdownAll()
-// 		ts.g.StartServers()
-// 		tester.AnnotateRestartAll()
+		// crash all
+		ts.g.Shutdown()
+		tester.AnnotateShutdownAll()
+		ts.g.StartServers()
+		tester.AnnotateRestartAll()
 
-// 		index2 := ts.one(rand.Int(), servers, true)
-// 		if index2 < index1+1 {
-// 			msg := fmt.Sprintf("index decreased from %v to %v", index1, index2)
-// 			tester.AnnotateCheckerFailure("incorrect behavior: index decreased", msg)
-// 			t.Fatalf(msg)
-// 		}
-// 	}
-// }
+		index2 := ts.one(rand.Int(), servers, true)
+		if index2 < index1+1 {
+			msg := fmt.Sprintf("index decreased from %v to %v", index1, index2)
+			tester.AnnotateCheckerFailure("incorrect behavior: index decreased", msg)
+			t.Fatalf(msg)
+		}
+	}
+}
 
-// // do servers correctly initialize their in-memory copy of the snapshot, making
-// // sure that future writes to persistent state don't lose state?
-// func TestSnapshotInit3D(t *testing.T) {
-// 	servers := 3
-// 	ts := makeTest(t, servers, false, true)
-// 	defer ts.cleanup()
+// do servers correctly initialize their in-memory copy of the snapshot, making
+// sure that future writes to persistent state don't lose state?
+func TestSnapshotInit3D(t *testing.T) {
+	servers := 3
+	ts := makeTest(t, servers, false, true)
+	defer ts.cleanup()
 
-// 	tester.AnnotateTest("TestSnapshotInit3D", servers)
-// 	ts.Begin("Test (3D): snapshot initialization after crash")
-// 	ts.one(rand.Int(), servers, true)
+	tester.AnnotateTest("TestSnapshotInit3D", servers)
+	ts.Begin("Test (3D): snapshot initialization after crash")
+	ts.one(rand.Int(), servers, true)
 
-// 	// enough ops to make a snapshot
-// 	nn := SnapShotInterval + 1
-// 	for i := 0; i < nn; i++ {
-// 		ts.one(rand.Int(), servers, true)
-// 	}
+	// enough ops to make a snapshot
+	nn := SnapShotInterval + 1
+	for i := 0; i < nn; i++ {
+		ts.one(rand.Int(), servers, true)
+	}
 
-// 	ts.g.Shutdown()
-// 	tester.AnnotateShutdownAll()
-// 	ts.g.StartServers()
-// 	tester.AnnotateRestartAll()
+	ts.g.Shutdown()
+	tester.AnnotateShutdownAll()
+	ts.g.StartServers()
+	tester.AnnotateRestartAll()
 
-// 	// a single op, to get something to be written back to persistent storage.
-// 	ts.one(rand.Int(), servers, true)
+	// a single op, to get something to be written back to persistent storage.
+	ts.one(rand.Int(), servers, true)
 
-// 	ts.g.Shutdown()
-// 	tester.AnnotateShutdownAll()
-// 	ts.g.StartServers()
-// 	tester.AnnotateRestartAll()
+	ts.g.Shutdown()
+	tester.AnnotateShutdownAll()
+	ts.g.StartServers()
+	tester.AnnotateRestartAll()
 
-// 	// do another op to trigger potential bug
-// 	ts.one(rand.Int(), servers, true)
-// }
+	// do another op to trigger potential bug
+	ts.one(rand.Int(), servers, true)
+}
