@@ -245,13 +245,13 @@ func (rf *Raft) startInstallSnapshot() {
 				if sendSnapshot {
 					go func(server int, lastIncludedIndex int, args *InstallSnapshotArgs) {
 						reply := &InstallSnapshotReply{}
-						ok := rf.sendInstallSnapshot(serverid, args, reply)
+						ok := rf.sendInstallSnapshot(server, args, reply)
 						resultCh <- struct {
 							ok                bool
 							id                int
 							lastIncludedIndex int
 							reply             *InstallSnapshotReply
-						}{ok, serverid, lastIncludedIndex, reply}
+						}{ok, server, lastIncludedIndex, reply}
 					}(serverid, lastIncludedIndex, args)
 				}
 
@@ -277,9 +277,14 @@ func (rf *Raft) startInstallSnapshot() {
 }
 
 func (rf *Raft) handleInstallSnapshot(leaderTerm int, lastIncludedIndex int, lastIncludedTerm int, data []byte) {
+	// If the incoming RPC has older term, ignore it.
 	if leaderTerm < rf.currentTerm {
 		return
 	}
+	// Treat InstallSnapshot like a heartbeat from the leader: reset heartbeat timeout.
+	rf.resetHeartbeatTimeout()
+	// If the RPC term is newer, update term and convert to follower.
+	rf.increaseTerm(leaderTerm)
 	if lastIncludedIndex <= rf.lastIncludedIndexInSnapshot {
 		DPrintf("Raft instance%d ignored snapshot due to request.lastIncludedIndex=%d and rf.lastIncludedIndexInSnapshot=%d", rf.me, lastIncludedIndex, rf.lastIncludedIndexInSnapshot)
 		return
@@ -300,6 +305,10 @@ func (rf *Raft) handleInstallSnapshot(leaderTerm int, lastIncludedIndex int, las
 
 			DPrintf("Raft instance%d agreed with snapshot lastIncludedIndex=%d lastIncludedTerm=%d", rf.me, lastIncludedIndex, lastIncludedTerm)
 			rf.printLog()
+			// If this snapshot advances what the follower has applied, apply it
+			if rf.lastApplied < rf.lastIncludedIndexInSnapshot {
+				rf.applySnapshot()
+			}
 			return
 		}
 	}
@@ -1110,8 +1119,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 // InstallSnapshot RPC handler
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.mu.Lock()
-	reply.Term = rf.currentTerm
+	// Handle the snapshot which may update currentTerm / convert to follower.
 	rf.handleInstallSnapshot(args.Term, args.LastIncludedIndex, args.LastIncludedTerm, args.Data)
+	// Ensure reply.Term reflects the (possibly updated) currentTerm after handling.
+	reply.Term = rf.currentTerm
 	rf.mu.Unlock()
 }
 
