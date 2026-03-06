@@ -39,11 +39,18 @@ const (
 )
 
 const (
-	appendEntriesPeriodicityMs = 10
+	// appendEntriesPeriodicityMs = 10
+	// applyEntriesPeriodicityMs  = 2
+	// electionCheckPeriodicityMs = 2
+	// electionTimeoutMs          = 80
+	// electionTimeoutRandMs      = 50
+
+	appendEntriesPeriodicityMs = 50
 	applyEntriesPeriodicityMs  = 2
 	electionCheckPeriodicityMs = 2
-	electionTimeoutMs          = 80
-	electionTimeoutRandMs      = 50
+	electionTimeoutMs          = 120
+	electionTimeoutRandMs      = 60
+
 	// appendEntriesPeriodicityMs = 50
 	// applyEntriesPeriodicityMs  = 2
 	// electionCheckPeriodicityMs = 10
@@ -533,56 +540,72 @@ func (rf *Raft) increaseFollowerWatermarksOnLeader(serverid int, lastLogIndex in
 }
 
 func (rf *Raft) decreaseFollowerWatermarksOnLeader(serverid int, oldNextIndex int, xterm int, xindex int, xlen int) {
-
-	//  TODO 3D: fencing. nextIndex could already have been increased by installing snapshot
-	//if (rf.nextIndex[serverid] == oldNextIndex) && (rf.nextIndex[serverid] > 0) { // somehow 3C tests become worse
-	// Mb check rf.nextIndex[serverid] > oldNextIndex
-
-	if rf.nextIndex[serverid] > 0 {
-		old := rf.nextIndex[serverid]
-		//rf.nextIndex[serverid] = rf.nextIndex[serverid] - 1
-
-		// TODO 3D
-
-		// 3C
-		// XTerm:  term in the conflicting entry (if any)
-		// XIndex: index of first entry with that term (if any)
-		// XLen:   log length
-
-		newIndex := old
-		if (xlen >= 0) && (rf.nextIndex[serverid] > xlen) {
-			// "Case 3: follower's log is too short: nextIndex = XLen"
-			newIndex = xlen
-		}
-		// else {
-		// 	if (xterm >= 0) && (xindex >= 0) {
-		// 		lastLogIndex := len(rf.log) - 1
-		// 		prevLogIndex := rf.nextIndex[serverid] - 1
-		// 		i := min(lastLogIndex, prevLogIndex)
-		// 		// Find xterm to the left. No sense to find to the right: follower responded false if term mismatch on prevLogIndex
-		// 		for ; (i >= 0) && (rf.log[i].Term > xterm); i-- {
-		// 		}
-		// 		// now i contains index of last entry with XTerm on leader or entry with lesser term if there is no XTerm on leader
-		// 		if rf.log[i].Term == xterm {
-		// 			// Case 2: leader has XTerm:
-		// 			//     nextIndex = (index of leader's last entry for XTerm) + 1
-		// 			rf.nextIndex[serverid] = i + 1
-		// 			newIndex = i + 1
-		// 		} else {
-		// 			// Case 1: leader doesn't have XTerm:
-		// 			//     nextIndex = XIndex
-		// 			newIndex = xindex
-		// 		}
-		// 	}
-		// }
-		if newIndex < rf.nextIndex[serverid] {
-			rf.nextIndex[serverid] = newIndex
-		} else {
-			rf.nextIndex[serverid] = rf.nextIndex[serverid] - 1 // TODO remove after 3D fixes implemented
-		}
-
-		DPrintf("Raft instance%d (Leader) decreased nextIndex[%d] from %d to %d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, serverid, old, rf.nextIndex[serverid], rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
+	if rf.nextIndex[serverid] == 0 {
+		return
 	}
+
+	old := rf.nextIndex[serverid]
+
+	// 3C
+	// XTerm:  term in the conflicting entry (if any)
+	// XIndex: index of first entry with that term (if any)
+	// XLen:   log length
+
+	newIndex := old
+	if (xlen >= 0) && (rf.nextIndex[serverid] > xlen) {
+		// "Case 3: follower's log is too short: nextIndex = XLen"
+		newIndex = xlen
+	} else {
+		//xindexLocal := rf.absToLocal(xindex)
+		if (xterm >= 0) && (xindex >= 0) {
+			// A half-way solution is to just use conflictIndex (and ignore conflictTerm),
+			// which simplifies the implementation, but then the leader will sometimes end up
+			// sending more log entries to the follower than is strictly necessary to bring them up to date.
+			newIndex = xindex
+
+			// 3D: not working
+			// lastLogIndexLocal := len(rf.log) - 1
+			// prevLogIndexLocal := rf.absToLocal(rf.nextIndex[serverid] - 1)
+			// i := min(lastLogIndexLocal, prevLogIndexLocal)
+			// if i < 0 {
+			// 	// 3D: i is inside snapshot
+			// 	if rf.isSnapshotExists() {
+			// 		newIndex = rf.lastIncludedIndexInSnapshot // snapshot must be installed
+			// 	} else {
+			// 		newIndex = old - 1 // fallback
+			// 	}
+			// } else {
+			// 	// Find xterm to the left. No sense to find to the right: follower responded false if term mismatch on prevLogIndex
+			// 	for ; (i >= 0) && (rf.log[i].Term > xterm); i-- {
+			// 	}
+			// 	// now i contains index of last entry with XTerm on leader or entry with lesser term if there is no XTerm on leader
+			// 	if rf.log[i].Term == xterm {
+			// 		// Case 2: leader has XTerm: nextIndex = (index of leader's last entry for XTerm) + 1
+			// 		//rf.nextIndex[serverid] = i + 1
+			// 		newIndex = i + 1
+			// 		if rf.isSnapshotExists() {
+			// 			newIndex = newIndex + rf.lastIncludedIndexInSnapshot + 1 // 3D: convert to abs index
+			// 		}
+			// 	} else {
+			// 		// Case 1: leader doesn't have XTerm: nextIndex = XIndex
+			// 		newIndex = xindex
+			// 	}
+			// }
+		}
+	}
+	if newIndex < old {
+		rf.nextIndex[serverid] = newIndex
+	}
+	if rf.nextIndex[serverid] < 0 {
+		rf.nextIndex[serverid] = 0
+	}
+
+	DPrintf("Raft instance%d (Leader) decreased nextIndex[%d] from %d to %d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, serverid, old, rf.nextIndex[serverid], rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
+
+}
+
+func (rf *Raft) isSnapshotExists() bool {
+	return rf.lastIncludedIndexInSnapshot >= 0
 }
 
 // AppendEntries RPC Handler
@@ -600,19 +623,20 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 	}
 	// "2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)"
 	if !rf.isLogConsistentWithLeader(prevLogIndex, prevLogTerm) {
-
 		// 3C:
 		// XTerm:  term in the conflicting entry (if any)
 		// XIndex: index of first entry with that term (if any)
 		// XLen:   log length
-
-		// TODO 3D
-		// if (prevLogIndex >= 0) && (prevLogIndex < len(rf.log)) {
-		// 	xterm = rf.log[prevLogIndex].Term
-		// 	for i := prevLogIndex; (i >= 0) && (rf.log[i].Term == xterm); i-- {
-		// 		xindex = i
-		// 	}
-		// }
+		prevLogIndexLocal := rf.absToLocal(prevLogIndex) // 3D
+		if (prevLogIndexLocal >= 0) && (prevLogIndexLocal < len(rf.log)) {
+			xterm = rf.log[prevLogIndexLocal].Term
+			for i := prevLogIndexLocal; (i >= 0) && (rf.log[i].Term == xterm); i-- {
+				xindex = i
+			}
+			if rf.isSnapshotExists() {
+				xindex = xindex + rf.lastIncludedIndexInSnapshot + 1 // 3D: if spanshot exsists, convert to abs index
+			}
+		}
 		return false, xterm, xindex, xlen
 	}
 
