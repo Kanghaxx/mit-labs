@@ -61,6 +61,7 @@ type appendEtriesResult struct {
 	id           int
 	nextIndex    int
 	lastLogIndex int
+	currentTerm  int
 	reply        *AppendEntriesReply
 }
 
@@ -220,6 +221,7 @@ func (rf *Raft) startInstallSnapshot() {
 		ok                bool
 		id                int
 		lastIncludedIndex int
+		currentTerm       int
 		reply             *InstallSnapshotReply
 	})
 
@@ -233,6 +235,7 @@ func (rf *Raft) startInstallSnapshot() {
 				rf.mu.Lock()
 				var args *InstallSnapshotArgs
 				lastIncludedIndex := rf.lastIncludedIndexInSnapshot
+				currentTerm := rf.currentTerm
 				sendSnapshot := (rf.lastIncludedIndexInSnapshot >= 0) && (rf.peerState == Leader) && (rf.nextIndex[serverid] <= rf.lastIncludedIndexInSnapshot) // send snapshot if nextIndex fo peer falls down inside snapshot
 				if sendSnapshot {
 					snapshot := make([]byte, len(rf.snapshot))
@@ -254,8 +257,9 @@ func (rf *Raft) startInstallSnapshot() {
 							ok                bool
 							id                int
 							lastIncludedIndex int
+							currentTerm       int
 							reply             *InstallSnapshotReply
-						}{ok, server, lastIncludedIndex, reply}
+						}{ok, server, lastIncludedIndex, currentTerm, reply}
 					}(serverid, lastIncludedIndex, args)
 				}
 
@@ -272,8 +276,10 @@ func (rf *Raft) startInstallSnapshot() {
 		if rf.increaseTerm(result.reply.Term) {
 			DPrintf("Raft instance%d (Leader) detected higher term %d on InstallSnapshot response from %d. Converting to follower", rf.me, result.reply.Term, result.id)
 		} else {
-			rf.increaseFollowerWatermarksOnLeader(result.id, result.lastIncludedIndex)
-			DPrintf("Raft instance%d (Leader) snapshot sent to peer [%d]. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d nextIndex[peer] = %d", rf.me, result.id, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot, rf.nextIndex[result.id])
+			if result.currentTerm == rf.currentTerm {
+				rf.increaseFollowerWatermarksOnLeader(result.id, result.lastIncludedIndex)
+				DPrintf("Raft instance%d (Leader) snapshot sent to peer [%d]. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d nextIndex[peer] = %d", rf.me, result.id, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot, rf.nextIndex[result.id])
+			}
 		}
 		rf.mu.Unlock()
 	}
@@ -405,21 +411,25 @@ func (rf *Raft) startLogReplicationAndHeartbeats() {
 		if rf.increaseTerm(result.reply.Term) {
 			DPrintf("Raft instance%d (Leader) detected higher term %d on AppendEntries response from %d. Converting to follower", rf.me, result.reply.Term, result.id)
 		} else {
-			if result.reply.Success {
-				// if follower successfuly stored entries, increase follower watermarks
-				if rf.nextIndex[result.id] != result.lastLogIndex+1 {
+			// "Compare the current term with the term you sent in your original RPC. If the two are different, drop the reply and return."
+			// "Only if the two terms are the same should you continue processing the reply."
+			if result.currentTerm == rf.currentTerm {
+				if result.reply.Success {
+					// if follower successfuly stored entries, increase follower watermarks
+					if rf.nextIndex[result.id] != result.lastLogIndex+1 {
 
-					DPrintf("Raft instance%d (Leader) increasing nextIndex[%d] from %d to %d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, result.id, rf.nextIndex[result.id], result.lastLogIndex+1, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
+						DPrintf("Raft instance%d (Leader) increasing nextIndex[%d] from %d to %d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, result.id, rf.nextIndex[result.id], result.lastLogIndex+1, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
+					}
+					rf.increaseFollowerWatermarksOnLeader(result.id, result.lastLogIndex)
+					ok, commitIndex := rf.increaseCommitIndexOnLeader() // increase commitIndex if quorum achieved
+					if ok {
+						DPrintf("Raft instance%d (Leader) increased commitIndex from %d to %d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, rf.commitIndex, commitIndex, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
+						//rf.printLog()
+					}
+				} else {
+					// if not success, decrease nextIndex: find index where leader and follower agree on their logs
+					rf.decreaseFollowerWatermarksOnLeader(result.id, result.nextIndex, result.reply.XTerm, result.reply.XIndex, result.reply.XLen)
 				}
-				rf.increaseFollowerWatermarksOnLeader(result.id, result.lastLogIndex)
-				ok, commitIndex := rf.increaseCommitIndexOnLeader() // increase commitIndex if quorum achieved
-				if ok {
-					DPrintf("Raft instance%d (Leader) increased commitIndex from %d to %d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, rf.commitIndex, commitIndex, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
-					//rf.printLog()
-				}
-			} else {
-				// if not success, decrease nextIndex: find index where leader and follower agree on their logs
-				rf.decreaseFollowerWatermarksOnLeader(result.id, result.nextIndex, result.reply.XTerm, result.reply.XIndex, result.reply.XLen)
 			}
 		}
 		rf.mu.Unlock()
@@ -438,6 +448,7 @@ func (rf *Raft) sendAppendEntriesToPeers() int {
 		rf.mu.Lock()
 		isLeader := rf.peerState == Leader
 		var args *AppendEntriesArgs
+		currentTerm := rf.currentTerm
 		nextIndex := -1
 		lastLogIndex := rf.getAbsLogLen() - 1
 		if isLeader {
@@ -477,7 +488,7 @@ func (rf *Raft) sendAppendEntriesToPeers() int {
 			go func(server int, a *AppendEntriesArgs, nextIndex int, lastLogIndex int) {
 				reply := &AppendEntriesReply{}
 				ok := rf.sendAppendEntries(server, a, reply)
-				rf.appendEntriesResultCh <- appendEtriesResult{ok, server, nextIndex, lastLogIndex, reply}
+				rf.appendEntriesResultCh <- appendEtriesResult{ok, server, nextIndex, lastLogIndex, currentTerm, reply}
 			}(serverid, args, nextIndex, lastLogIndex)
 		}
 	}
@@ -528,21 +539,22 @@ func (rf *Raft) decreaseFollowerWatermarksOnLeader(serverid int, oldNextIndex in
 	// Mb check rf.nextIndex[serverid] > oldNextIndex
 
 	if rf.nextIndex[serverid] > 0 {
-		from := rf.nextIndex[serverid]
-		rf.nextIndex[serverid] = rf.nextIndex[serverid] - 1
+		old := rf.nextIndex[serverid]
+		//rf.nextIndex[serverid] = rf.nextIndex[serverid] - 1
 
 		// TODO 3D
 
-		// newIndex := old
-		// // 3C
-		// // XTerm:  term in the conflicting entry (if any)
-		// // XIndex: index of first entry with that term (if any)
-		// // XLen:   log length
-		// if (xlen >= 0) && (rf.nextIndex[serverid] > xlen) {
-		// 	// Case 3: follower's log is too short:
-		// 	//     nextIndex = XLen
-		// 	newIndex = xlen
-		// } else {
+		// 3C
+		// XTerm:  term in the conflicting entry (if any)
+		// XIndex: index of first entry with that term (if any)
+		// XLen:   log length
+
+		newIndex := old
+		if (xlen >= 0) && (rf.nextIndex[serverid] > xlen) {
+			// "Case 3: follower's log is too short: nextIndex = XLen"
+			newIndex = xlen
+		}
+		// else {
 		// 	if (xterm >= 0) && (xindex >= 0) {
 		// 		lastLogIndex := len(rf.log) - 1
 		// 		prevLogIndex := rf.nextIndex[serverid] - 1
@@ -563,11 +575,13 @@ func (rf *Raft) decreaseFollowerWatermarksOnLeader(serverid int, oldNextIndex in
 		// 		}
 		// 	}
 		// }
-		// if newIndex < rf.nextIndex[serverid] {
-		// 	rf.nextIndex[serverid] = newIndex
-		// }
+		if newIndex < rf.nextIndex[serverid] {
+			rf.nextIndex[serverid] = newIndex
+		} else {
+			rf.nextIndex[serverid] = rf.nextIndex[serverid] - 1 // TODO remove after 3D fixes implemented
+		}
 
-		DPrintf("Raft instance%d (Leader) decreased nextIndex[%d] from %d to %d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, serverid, from, rf.nextIndex[serverid], rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
+		DPrintf("Raft instance%d (Leader) decreased nextIndex[%d] from %d to %d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, serverid, old, rf.nextIndex[serverid], rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
 	}
 }
 
@@ -576,7 +590,7 @@ func (rf *Raft) handleAppendEntries(leaderTerm int, leaderCommit int, prevLogInd
 	// "1. Reply false if term < currentTerm (§5.1)"
 	xterm = -1
 	xindex = -1
-	xlen = len(rf.log) // TODO 3D
+	xlen = rf.getAbsLogLen()
 	if leaderTerm < rf.currentTerm {
 		return false, xterm, xindex, xlen // ignore zombie leaders: Reply false if term < currentTerm (§5.1)
 	}
@@ -863,14 +877,16 @@ func (rf *Raft) startElection() {
 			if success {
 				//DPrintf("Raft instance%d received majority votes (%d), becoming leader", rf.me, votes)
 				rf.mu.Lock()
-				if rf.transitionToLeader(currentTerm) {
+				becameLeader := rf.transitionToLeader(currentTerm)
+				if becameLeader {
 					DPrintf("Raft instance%d is now LEADER for term %d, votes=%d", rf.me, rf.currentTerm, votes)
-
 				} else {
 					//DPrintf("Raft instance%d transition to leader fail: already fallen back to follower", rf.me)
 				}
 				rf.mu.Unlock()
-				rf.sendAppendEntriesToPeers() // Send initial heartbeats. Locking and leader check inside
+				if becameLeader {
+					rf.sendAppendEntriesToPeers() // send initial heartbeats
+				}
 			} else {
 				if higherTermSeen {
 					rf.mu.Lock()
