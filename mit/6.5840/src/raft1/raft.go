@@ -354,7 +354,7 @@ func (rf *Raft) applySnapshot() {
 func (rf *Raft) startLogApply() {
 	for rf.killed() == false {
 
-		rf.applySnapshot() // restore after reboot. TODO probably do 1 time on reboot
+		rf.applySnapshot() // restore after reboot. Must apply outside Make() because the client hasn't received the object yet and isn't listening on applyCh there
 
 		applyMsg := raftapi.ApplyMsg{CommandValid: true}
 
