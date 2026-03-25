@@ -198,6 +198,7 @@ func (rf *Raft) startLogApply() {
 				//rf.printLog()
 			}
 			applyMsg.Command = rf.log[lastAppliedLocal].Command
+			applyMsg.CommandTerm = rf.log[lastAppliedLocal].Term
 			applyMsg.CommandIndex = rf.lastApplied + 1 // pretend 1-indexed. If not, tests fail with "one(100) failed to reach agreement" or "got index 0 but expected 1": 1 is hardcoded in tests
 		}
 		rf.mu.Unlock()
@@ -209,10 +210,10 @@ func (rf *Raft) startLogApply() {
 			rf.applyCh <- applyMsg
 			//log.Printf("Raft instance%d command applied: %v", rf.me, applyMsg)
 
-			rf.mu.Lock()
+			//rf.mu.Lock()
 			//DPrintf("Raft instance%d has applied command at log index=%d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, rf.lastApplied, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
 			//rf.printLog()
-			rf.mu.Unlock()
+			//rf.mu.Unlock()
 		}
 		time.Sleep(time.Duration(applyEntriesPeriodicityMs) * time.Millisecond)
 	}

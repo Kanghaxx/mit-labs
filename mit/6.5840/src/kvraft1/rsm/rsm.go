@@ -63,8 +63,8 @@ type RSM struct {
 	maxraftstate int // snapshot if log grows this big
 	sm           StateMachine
 	// Your definitions here.
-	lastId int
-	queue  *list.List
+	lastId         int
+	pendingSubmits *list.List
 }
 
 // servers[] contains the ports of the set of
@@ -85,11 +85,11 @@ type RSM struct {
 func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, maxraftstate int, sm StateMachine) *RSM {
 	raft.DPrintf("RSM node%d: starting", me)
 	rsm := &RSM{
-		me:           me,
-		maxraftstate: maxraftstate,
-		applyCh:      make(chan raftapi.ApplyMsg),
-		sm:           sm,
-		queue:        list.New(),
+		me:             me,
+		maxraftstate:   maxraftstate,
+		applyCh:        make(chan raftapi.ApplyMsg),
+		sm:             sm,
+		pendingSubmits: list.New(),
 	}
 	if !useRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
@@ -109,51 +109,54 @@ func DPrintf(format string, a ...interface{}) {
 }
 func (rsm *RSM) startReader() {
 	//log.Printf("RSM node%d: starting reader", rsm.me)
-	for applyOp := range rsm.applyCh {
-		op := applyOp.Command.(Op)
+	for applyMsg := range rsm.applyCh {
+		applyOp := applyMsg.Command.(Op)
+
+		// call DoOp() here because followers don't have pending Submit goroutines
+		result := rsm.sm.DoOp(applyOp.Command)
+		DPrintf("RSM node%d: READER: DoOp executed. applyOp.ID=%v applyOp.index=%d", rsm.me, applyOp.ID, applyMsg.CommandIndex)
 
 		// dequeue and compare op with dequeued items
-		var pendingSubmitRequest *SubmitRequest
 		rsm.mu.Lock()
-		if rsm.queue.Len() > 0 {
+		if rsm.pendingSubmits.Len() > 0 {
 			// Peek first and dequeue only if queued.index == applied.index:
 			// applied.index == queued.index: dequeue, check IDs equal and call DoOp()
 			// applied.index < queued.index: the peer just became a leader and queued 1 submit to the top of the log,
 			// 	 but applyCh still applies older committed records from previous leaders.
 			//   In this case: skip and only call DoOp()
 			// applied.index > queued.index: probably impossible. Log grows monolonically only.
-			element := rsm.queue.Front()
-			val := element.Value // peek
-			pendingSubmitRequest = val.(*SubmitRequest)
-			// TODO compare terms of queued and applied ops and if they differ, cancel all pending ops with that term (or <=)
-			if applyOp.CommandIndex == pendingSubmitRequest.CommandIndex {
-				rsm.queue.Remove(element) // dequeue if applying the same command
-			} else if applyOp.CommandIndex < pendingSubmitRequest.CommandIndex {
+			pendingSubmit := rsm.pendingSubmits.Front() // peek
+			pendingSubmitData := pendingSubmit.Value.(*SubmitRequest)
+			if applyMsg.CommandIndex == pendingSubmitData.CommandIndex {
+				if applyOp.ID == pendingSubmitData.Operation.ID {
+					// received the same command that was added at that index: dequeue it and reply OK
+					rsm.pendingSubmits.Remove(pendingSubmit) // dequeue if applying the same command
+					pendingSubmitData.ReplyCh <- SubmitResponse{Result: result, Error: rpc.OK}
+					DPrintf("RSM node%d: READER: sending OK response. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
+						rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
+				} else {
+					// received a different command at the same index: cancel all pending submits having term < applyMsg.term
+					for pendingSubmit != nil && pendingSubmitData.CommandTerm < applyMsg.CommandTerm {
+						pendingSubmitData.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
+						DPrintf("RSM node%d: READER: sending ErrWrongLeader response. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
+							rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
+						rsm.pendingSubmits.Remove(pendingSubmit)
+						pendingSubmit = rsm.pendingSubmits.Front() // peek
+						if pendingSubmit != nil {
+							pendingSubmitData = pendingSubmit.Value.(*SubmitRequest)
+						}
+					}
+				}
+			} else if applyMsg.CommandIndex < pendingSubmitData.CommandIndex {
 				DPrintf("RSM node%d: READER: skipping applyOp.index < queued.index. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
-					rsm.me, op.ID, applyOp.CommandIndex, pendingSubmitRequest.Operation.ID, pendingSubmitRequest.CommandIndex)
+					rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
 			} else {
-				panic(fmt.Sprintf("RSM node%d: READER: detected applyOp.index > queued.index. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
-					rsm.me, op.ID, applyOp.CommandIndex, pendingSubmitRequest.Operation.ID, pendingSubmitRequest.CommandIndex))
+				panic(fmt.Sprintf("RSM node%d: READER: unexpected applyOp.index > queued.index. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
+					rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex))
 			}
 		}
 		rsm.mu.Unlock()
 
-		// call DoOp() here because followers don't have pending Submit goroutines
-		result := rsm.sm.DoOp(op.Command)
-		DPrintf("RSM node%d: READER: DoOp executed. applyOp.ID=%v applyOp.index=%d", rsm.me, op.ID, applyOp.CommandIndex)
-
-		if pendingSubmitRequest != nil && applyOp.CommandIndex == pendingSubmitRequest.CommandIndex {
-			// compare applied with queued
-			if op.ID == pendingSubmitRequest.Operation.ID {
-				pendingSubmitRequest.ReplyCh <- SubmitResponse{Result: result, Error: rpc.OK}
-				DPrintf("RSM node%d: READER: sending OK response. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
-					rsm.me, op.ID, applyOp.CommandIndex, pendingSubmitRequest.Operation.ID, pendingSubmitRequest.CommandIndex)
-			} else {
-				pendingSubmitRequest.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
-				DPrintf("RSM node%d: READER: sending ErrWrongLeader response. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
-					rsm.me, op.ID, applyOp.CommandIndex, pendingSubmitRequest.Operation.ID, pendingSubmitRequest.CommandIndex)
-			}
-		}
 	}
 	rsm.Kill()
 	DPrintf("RSM node%d: reader exit", rsm.me)
@@ -194,28 +197,28 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 		CommandIndex: index,
 		CommandTerm:  term,
 	}
-	element := rsm.queue.PushBack(r) // maybe min heap? so result could be added outside lock (probably not)
+	pendingSubmit := rsm.pendingSubmits.PushBack(r)
 	rsm.mu.Unlock()
 
-	val := element.Value
-	pendingSubmitRequest := val.(*SubmitRequest)
-
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-
 	DPrintf("RSM node%d: waiting to complete for index=%d op.ID=%v", rsm.me, index, op.ID)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
 		case response := <-r.ReplyCh:
 			DPrintf("RSM node%d: Submit received result for op.ID=%v: error=%v result=%v", rsm.me, op.ID, response.Error, response.Result)
 			return response.Error, response.Result
-		case <-ticker.C: // probably better to cancel submits from reader goroutine: if command with newer term detected. But need to add term into command
+		// fallback: check current peer state if the cluster is inactive and reader-goroutine can't remove pending submits due to no new applied commands in applyCh
+		// probably not needed: if there are no new entries applied, we couldn't know if the added entries are going to be committed or deleted from raft's log.
+		//   so it's OK to wait until the cluster recovers
+		case <-ticker.C:
+			pendingSubmitData := pendingSubmit.Value.(*SubmitRequest)
 			newTerm, _ := rsm.rf.GetState()
-			if pendingSubmitRequest.CommandTerm < newTerm {
+			if pendingSubmitData.CommandTerm < newTerm {
 				rsm.mu.Lock()
-				if rsm.queue.Len() > 0 {
-					DPrintf("RSM node%d: Submit canceled for op.ID=%v term=%d due to new term=%d", rsm.me, op.ID, pendingSubmitRequest.CommandTerm, newTerm)
-					rsm.queue.Remove(element) // probably race condition with reader goroutine
+				if rsm.pendingSubmits.Len() > 0 {
+					DPrintf("RSM node%d: Submit canceled due timeout for op.ID=%v term=%d due to new term=%d", rsm.me, op.ID, pendingSubmitData.CommandTerm, newTerm)
+					rsm.pendingSubmits.Remove(pendingSubmit) // seems to be safe: if already removed from reader the call does nothing
 					rsm.mu.Unlock()
 					return rpc.ErrWrongLeader, nil
 				}
@@ -228,9 +231,9 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 func (rsm *RSM) Kill() {
 	DPrintf("RSM node%d: Kill started", rsm.me)
 	rsm.mu.Lock()
-	for rsm.queue.Len() > 0 {
-		element := rsm.queue.Front()
-		val := rsm.queue.Remove(element)
+	for rsm.pendingSubmits.Len() > 0 {
+		element := rsm.pendingSubmits.Front()
+		val := rsm.pendingSubmits.Remove(element)
 		pendingSubmitRequest := val.(*SubmitRequest)
 		pendingSubmitRequest.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
 		//close(pendingSubmitRequest.ReplyCh) // ?
