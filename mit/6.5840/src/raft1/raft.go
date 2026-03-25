@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"log"
 	"math/rand"
 	"slices"
 	"sort"
@@ -109,6 +110,8 @@ type Raft struct {
 	snapshot                    []byte
 	lastIncludedIndexInSnapshot int
 	lastIncludedTermInSnapshot  int
+	// Completion
+	applyCompletedCh chan bool
 }
 
 type RaftState struct {
@@ -162,6 +165,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		rf.nextIndex[i] = rf.getAbsLogLen() // initialized to leader last log index + 1
 		rf.matchIndex[i] = -1               // initialized to 0, increases monotonically
 	}
+	rf.applyCompletedCh = make(chan bool, 1)
 
 	go rf.startElection()
 	go rf.startLogReplicationAndHeartbeats()
@@ -201,15 +205,18 @@ func (rf *Raft) startLogApply() {
 		if applyLog {
 			// channels are sync: if apply inside lock, all other threads that acquire this lock will wait for the subscriber (client) to get the message out.
 			// instead apply outside lock so only apply thread is blocked until client gets the message out of the channel.
+			//log.Printf("Raft instance%d applying command: %v", rf.me, applyMsg)
 			rf.applyCh <- applyMsg
+			//log.Printf("Raft instance%d command applied: %v", rf.me, applyMsg)
 
-			//rf.mu.Lock()
+			rf.mu.Lock()
 			//DPrintf("Raft instance%d has applied command at log index=%d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, rf.lastApplied, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
 			//rf.printLog()
-			//rf.mu.Unlock()
+			rf.mu.Unlock()
 		}
 		time.Sleep(time.Duration(applyEntriesPeriodicityMs) * time.Millisecond)
 	}
+	rf.applyCompletedCh <- true
 }
 
 func (rf *Raft) copySnapshotBytes() []byte {
@@ -1302,7 +1309,7 @@ func (rf *Raft) printLog() {
 		s += fmt.Sprintf(" %v(%v) ", v.Command, v.Term)
 	}
 	s += "]"
-	DPrintf("Raft instance%d log: %v", rf.me, s)
+	log.Printf("Raft instance%d log: %v", rf.me, s)
 }
 
 // return currentTerm and whether this server
@@ -1449,6 +1456,9 @@ func (rf *Raft) PersistBytes() int {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
+	//log.Printf("Raft isntance%d: someone called Kill", rf.me)
+	<-rf.applyCompletedCh // wait for apply-loop to exit so it wouldn't send to a closed channel
+	close(rf.applyCh)
 }
 
 func (rf *Raft) killed() bool {
