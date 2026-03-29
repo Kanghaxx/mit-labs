@@ -1,16 +1,20 @@
 package kvraft
 
 import (
+	"sync"
+	"time"
+
 	"6.5840/kvsrv1/rpc"
-	"6.5840/kvtest1"
-	"6.5840/tester1"
+	kvtest "6.5840/kvtest1"
+	tester "6.5840/tester1"
 )
 
-
 type Clerk struct {
+	mu      sync.Mutex
 	clnt    *tester.Clnt
 	servers []string
 	// You will have to modify this struct.
+	leader int
 }
 
 func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
@@ -30,9 +34,23 @@ func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
+	reply := &rpc.GetReply{}
 
-	// You will have to modify this function.
-	return "", 0, ""
+	ck.mu.Lock()
+	server := ck.leader
+	ck.mu.Unlock()
+	for {
+		result := ck.clnt.Call(ck.servers[server], "KVServer.Get", &rpc.GetArgs{Key: key}, reply)
+		if result && (reply.Err != rpc.ErrWrongLeader) {
+			break
+		}
+		server = (server + 1) % len(ck.servers)
+		time.Sleep(100 * time.Millisecond)
+	}
+	ck.mu.Lock()
+	ck.leader = server
+	ck.mu.Unlock()
+	return reply.Value, reply.Version, reply.Err
 }
 
 // Put updates key with value only if the version in the
@@ -53,6 +71,24 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
-	// You will have to modify this function.
-	return ""
+	reply := &rpc.PutReply{}
+	attempt := 1
+	ck.mu.Lock()
+	server := ck.leader
+	ck.mu.Unlock()
+	for {
+		result := ck.clnt.Call(ck.servers[server], "KVServer.Put", &rpc.PutArgs{Key: key, Value: value, Version: version}, reply)
+		if result && (reply.Err != rpc.ErrWrongLeader) {
+			break
+		}
+		if !result {
+			attempt++
+		}
+		server = (server + 1) % len(ck.servers)
+		time.Sleep(100 * time.Millisecond)
+	}
+	if attempt > 1 && reply.Err == rpc.ErrVersion {
+		return rpc.ErrMaybe
+	}
+	return reply.Err
 }

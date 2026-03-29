@@ -110,6 +110,30 @@ func DPrintf(format string, a ...interface{}) {
 func (rsm *RSM) startReader() {
 	//log.Printf("RSM node%d: starting reader", rsm.me)
 	for applyMsg := range rsm.applyCh {
+		// AI slop:
+		// Handle snapshot messages first
+		// if applyMsg.SnapshotValid {
+		// 	log.Printf("RSM node%d: READER: received snapshot. index=%d term=%d", rsm.me, applyMsg.SnapshotIndex, applyMsg.SnapshotTerm)
+		// 	// Restore snapshot into state machine. Do this outside of the pendingSubmits lock
+		// 	rsm.sm.Restore(applyMsg.Snapshot)
+		// 	// We don't try to reconcile pending submits here; the existing reader logic
+		// 	// will handle pending submits as new ApplyMsg entries arrive.
+		// 	continue
+		// }
+		// // Ignore non-command messages
+		// if !applyMsg.CommandValid {
+		// 	log.Printf("RSM node%d: READER: received non-command ApplyMsg, skipping", rsm.me)
+		// 	continue
+		// }
+
+		// // Be defensive: Command may be nil or of unexpected type when tests
+		// // simulate network partitions/crashes. Avoid panics from type assertions.
+		// applyOp, ok := applyMsg.Command.(Op)
+		// if !ok {
+		// 	log.Printf("RSM node%d: READER: unexpected command type %T (nil?), skipping", rsm.me, applyMsg.Command)
+		// 	continue
+		// }
+
 		applyOp := applyMsg.Command.(Op)
 
 		// call DoOp() here because followers don't have pending Submit goroutines
