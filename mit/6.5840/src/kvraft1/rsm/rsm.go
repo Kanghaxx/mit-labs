@@ -2,7 +2,6 @@ package rsm
 
 import (
 	"container/list"
-	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -175,8 +174,50 @@ func (rsm *RSM) startReader() {
 				DPrintf("RSM node%d: READER: skipping applyOp.index < queued.index. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
 					rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
 			} else {
-				panic(fmt.Sprintf("RSM node%d: READER: unexpected applyOp.index > queued.index. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
-					rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex))
+				//panic(fmt.Sprintf("RSM node%d: READER: unexpected applyOp.index > queued.index. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
+				//	rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex))
+
+				// TODO
+				// AI:
+				//  The comment says "probably impossible. Log grows monotonically only", but it's actually possible in a partitioned network. The issue is:
+
+				// A node is leader and submits commands (indices 1,2,3...)
+				// The node gets partitioned and becomes a follower
+				// The new leader has already advanced the log beyond where this node was
+				// When this node reconnects, Raft applies committed entries it had missed, and those entries can have indices higher than what was at the top of the pendingSubmits queue
+				// The fix is to handle this case: when we receive an applied command with an index higher than the oldest pending submit, we should skip the pending submit (since it may have been superseded or the leader changed) and continue. Let me update the code:
+
+				// Summary of Fixes
+				// 1. Client Put Logic (client.go)
+				// Problem: The retry tracking was incorrect. It only counted failed RPC calls, not all retry attempts to different servers.
+
+				// Solution: Changed attempt to be incremented for every server we try (whether the RPC fails or returns ErrWrongLeader), starting from 0. This ensures we correctly detect resends and return ErrMaybe when appropriate.
+
+				// 2. RSM Reader Logic (rsm.go)
+				// Problem: The code panicked when an applied operation's index was higher than the oldest pending submit's index. The comment said this was "probably impossible" but it IS possible in partitioned networks.
+
+				// Solution: Instead of panicking, the code now handles this gracefully by:
+
+				// Recognizing this happens when leadership changes and new log entries are committed
+				// Dequeuing all pending submits with indices lower than the current apply index
+				// Returning ErrWrongLeader for those submits since they may never be committed
+				// This allows the RSM to continue operating correctly during network partitions
+				// These fixes ensure that the KVRaft implementation correctly handles network partitions while maintaining consistency between clients and servers.
+
+				// applyMsg.CommandIndex > pendingSubmitData.CommandIndex
+				// This can happen in a partitioned network: we queued a submit at some index,
+				// but the leader changed and log entries beyond that were committed.
+				// We don't know if our submit will ever be committed, so treat it as lost.
+				for pendingSubmit != nil && applyMsg.CommandIndex > pendingSubmitData.CommandIndex {
+					pendingSubmitData.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
+					DPrintf("RSM node%d: READER: sending ErrWrongLeader due to gap. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
+						rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
+					rsm.pendingSubmits.Remove(pendingSubmit)
+					pendingSubmit = rsm.pendingSubmits.Front()
+					if pendingSubmit != nil {
+						pendingSubmitData = pendingSubmit.Value.(*SubmitRequest)
+					}
+				}
 			}
 		}
 		rsm.mu.Unlock()
