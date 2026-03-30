@@ -133,6 +133,12 @@ func (rsm *RSM) startReader() {
 		// 	continue
 		// }
 
+		// Ignore non-command messages
+		if !applyMsg.CommandValid {
+			log.Printf("RSM node%d: READER: received non-command ApplyMsg, skipping", rsm.me)
+			continue
+		}
+
 		applyOp := applyMsg.Command.(Op)
 
 		// call DoOp() here because followers don't have pending Submit goroutines
@@ -155,8 +161,11 @@ func (rsm *RSM) startReader() {
 					// received the same command that was added at that index: dequeue it and reply OK
 					rsm.pendingSubmits.Remove(pendingSubmit) // dequeue if applying the same command
 					pendingSubmitData.ReplyCh <- SubmitResponse{Result: result, Error: rpc.OK}
-					DPrintf("RSM node%d: READER: sending OK response. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
-						rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
+					// log.Printf("RSM node%d: READER: sending OK response. applyOp.command=%+v applyOp.command.type=%T applyOp.ID=%v applyOp.index=%d; queueed.command=%+v queued.id=%v queued.index=%d; DoOP.result=%+v DoOP.result.type=%T",
+					// 	rsm.me,
+					// 	applyOp.Command, applyOp.Command, applyOp.ID, applyMsg.CommandIndex,
+					// 	pendingSubmitData.Operation.Command, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex,
+					// 	result, result)
 				} else {
 					// received a different command at the same index: cancel all pending submits having term < applyMsg.term
 					for pendingSubmit != nil && pendingSubmitData.CommandTerm < applyMsg.CommandTerm {
@@ -250,7 +259,7 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	}
 	DPrintf("RSM node%d: calling Start for ID=%v...", rsm.me, op.ID)
 	index, term, isLeader := rsm.rf.Start(op)
-	DPrintf("RSM node%d: Start executed. index=%d, term=%d, isLeader=%v", rsm.me, index, term, isLeader)
+	// log.Printf("RSM node%d: Start executed for op.ID=%v op.command=%+v. index=%d, term=%d, isLeader=%v", rsm.me, op.ID, op.Command, index, term, isLeader)
 	if !isLeader {
 		DPrintf("RSM node%d: not a leader, returning error. index=%d, term=%d, isLeader=%v", rsm.me, index, term, isLeader)
 		rsm.mu.Unlock()

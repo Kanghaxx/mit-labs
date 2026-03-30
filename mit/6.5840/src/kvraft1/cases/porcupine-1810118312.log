@@ -1,0 +1,410 @@
+ 
+Test: many clients (4B many clients) (unreliable network)...
+2026/03/31 00:09:40 RSM node0: Start executed for op.ID={0 1} op.command={Key:k Value:{"Id":4,"V":0} Version:0}. index=-1, term=0, isLeader=false
+2026/03/31 00:09:40 RSM node0: Start executed for op.ID={0 2} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=-1, term=0, isLeader=false
+2026/03/31 00:09:40 RSM node0: Start executed for op.ID={0 3} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=-1, term=0, isLeader=false
+2026/03/31 00:09:40 RSM node0: Start executed for op.ID={0 4} op.command={Key:k Value:{"Id":0,"V":0} Version:0}. index=-1, term=0, isLeader=false
+2026/03/31 00:09:40 RSM node0: Start executed for op.ID={0 5} op.command={Key:k Value:{"Id":2,"V":0} Version:0}. index=-1, term=0, isLeader=false
+2026/03/31 00:09:41 RSM node1: Start executed for op.ID={1 1} op.command={Key:k Value:{"Id":4,"V":0} Version:0}. index=-1, term=0, isLeader=false
+2026/03/31 00:09:41 RSM node1: Start executed for op.ID={1 2} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=-1, term=0, isLeader=false
+2026/03/31 00:09:41 RSM node1: Start executed for op.ID={1 3} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=-1, term=0, isLeader=false
+2026/03/31 00:09:41 RSM node1: Start executed for op.ID={1 4} op.command={Key:k Value:{"Id":0,"V":0} Version:0}. index=-1, term=0, isLeader=false
+2026/03/31 00:09:41 RSM node1: Start executed for op.ID={1 5} op.command={Key:k Value:{"Id":2,"V":0} Version:0}. index=-1, term=0, isLeader=false
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 1} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=1, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 2} op.command={Key:k Value:{"Id":0,"V":0} Version:0}. index=2, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 3} op.command={Key:k Value:{"Id":4,"V":0} Version:0}. index=3, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 1} applyOp.index=1; queueed.command={Key:k Value:{"Id":1,"V":0} Version:0} queued.id={2 1} queued.index=1; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":0,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 2} applyOp.index=2; queueed.command={Key:k Value:{"Id":0,"V":0} Version:0} queued.id={2 2} queued.index=2; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 4} op.command={Key:k Value:{"Id":2,"V":0} Version:0}. index=4, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 5} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=5, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 3} applyOp.index=3; queueed.command={Key:k Value:{"Id":4,"V":0} Version:0} queued.id={2 3} queued.index=3; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 4} applyOp.index=4; queueed.command={Key:k Value:{"Id":2,"V":0} Version:0} queued.id={2 4} queued.index=4; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 5} applyOp.index=5; queueed.command={Key:k Value:{"Id":3,"V":0} Version:0} queued.id={2 5} queued.index=5; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 6} op.command={Key:k}. index=6, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 7} op.command={Key:k}. index=7, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 8} op.command={Key:k}. index=8, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 6} applyOp.index=6; queueed.command={Key:k} queued.id={2 6} queued.index=6; DoOP.result={Value:{"Id":1,"V":0} Version:1 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 7} applyOp.index=7; queueed.command={Key:k} queued.id={2 7} queued.index=7; DoOP.result={Value:{"Id":1,"V":0} Version:1 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 8} applyOp.index=8; queueed.command={Key:k} queued.id={2 8} queued.index=8; DoOP.result={Value:{"Id":1,"V":0} Version:1 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 9} op.command={Key:k Value:{"Id":0,"V":1} Version:1}. index=9, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 10} op.command={Key:k Value:{"Id":4,"V":1} Version:1}. index=10, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":0,"V":1} Version:1} applyOp.command.type=rpc.PutArgs applyOp.ID={2 9} applyOp.index=9; queueed.command={Key:k Value:{"Id":0,"V":1} Version:1} queued.id={2 9} queued.index=9; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 11} op.command={Key:k}. index=11, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 12} op.command={Key:k Value:{"Id":2,"V":1} Version:1}. index=12, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":1} Version:1} applyOp.command.type=rpc.PutArgs applyOp.ID={2 10} applyOp.index=10; queueed.command={Key:k Value:{"Id":4,"V":1} Version:1} queued.id={2 10} queued.index=10; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 11} applyOp.index=11; queueed.command={Key:k} queued.id={2 11} queued.index=11; DoOP.result={Value:{"Id":0,"V":1} Version:2 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 13} op.command={Key:k Value:{"Id":0,"V":2} Version:2}. index=13, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":1} Version:1} applyOp.command.type=rpc.PutArgs applyOp.ID={2 12} applyOp.index=12; queueed.command={Key:k Value:{"Id":2,"V":1} Version:1} queued.id={2 12} queued.index=12; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 14} op.command={Key:k}. index=14, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":0,"V":2} Version:2} applyOp.command.type=rpc.PutArgs applyOp.ID={2 13} applyOp.index=13; queueed.command={Key:k Value:{"Id":0,"V":2} Version:2} queued.id={2 13} queued.index=13; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node3: Start executed for op.ID={3 1} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 15} op.command={Key:k}. index=15, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 14} applyOp.index=14; queueed.command={Key:k} queued.id={2 14} queued.index=14; DoOP.result={Value:{"Id":0,"V":2} Version:3 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 15} applyOp.index=15; queueed.command={Key:k} queued.id={2 15} queued.index=15; DoOP.result={Value:{"Id":0,"V":2} Version:3 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 16} op.command={Key:k Value:{"Id":2,"V":3} Version:3}. index=16, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 17} op.command={Key:k Value:{"Id":4,"V":3} Version:3}. index=17, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":3} Version:3} applyOp.command.type=rpc.PutArgs applyOp.ID={2 16} applyOp.index=16; queueed.command={Key:k Value:{"Id":2,"V":3} Version:3} queued.id={2 16} queued.index=16; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 18} op.command={Key:k}. index=18, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":3} Version:3} applyOp.command.type=rpc.PutArgs applyOp.ID={2 17} applyOp.index=17; queueed.command={Key:k Value:{"Id":4,"V":3} Version:3} queued.id={2 17} queued.index=17; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 19} op.command={Key:k}. index=19, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node3: Start executed for op.ID={3 2} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 18} applyOp.index=18; queueed.command={Key:k} queued.id={2 18} queued.index=18; DoOP.result={Value:{"Id":2,"V":3} Version:4 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 19} applyOp.index=19; queueed.command={Key:k} queued.id={2 19} queued.index=19; DoOP.result={Value:{"Id":2,"V":3} Version:4 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 20} op.command={Key:k Value:{"Id":4,"V":4} Version:4}. index=20, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 21} op.command={Key:k Value:{"Id":2,"V":4} Version:4}. index=21, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":4} Version:4} applyOp.command.type=rpc.PutArgs applyOp.ID={2 20} applyOp.index=20; queueed.command={Key:k Value:{"Id":4,"V":4} Version:4} queued.id={2 20} queued.index=20; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":4} Version:4} applyOp.command.type=rpc.PutArgs applyOp.ID={2 21} applyOp.index=21; queueed.command={Key:k Value:{"Id":2,"V":4} Version:4} queued.id={2 21} queued.index=21; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 22} op.command={Key:k}. index=22, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node4: Start executed for op.ID={4 1} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 22} applyOp.index=22; queueed.command={Key:k} queued.id={2 22} queued.index=22; DoOP.result={Value:{"Id":4,"V":4} Version:5 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 23} op.command={Key:k Value:{"Id":4,"V":5} Version:5}. index=23, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node3: Start executed for op.ID={3 3} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":5} Version:5} applyOp.command.type=rpc.PutArgs applyOp.ID={2 23} applyOp.index=23; queueed.command={Key:k Value:{"Id":4,"V":5} Version:5} queued.id={2 23} queued.index=23; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 24} op.command={Key:k}. index=24, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 24} applyOp.index=24; queueed.command={Key:k} queued.id={2 24} queued.index=24; DoOP.result={Value:{"Id":4,"V":5} Version:6 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node4: Start executed for op.ID={4 2} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node3: Start executed for op.ID={3 4} op.command={Key:k Value:{"Id":2,"V":4} Version:4}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node0: Start executed for op.ID={0 6} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node4: Start executed for op.ID={4 3} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node3: Start executed for op.ID={3 5} op.command={Key:k Value:{"Id":4,"V":6} Version:6}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node0: Start executed for op.ID={0 7} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node4: Start executed for op.ID={4 4} op.command={Key:k Value:{"Id":2,"V":4} Version:4}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node1: Start executed for op.ID={1 6} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node0: Start executed for op.ID={0 8} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node4: Start executed for op.ID={4 5} op.command={Key:k Value:{"Id":4,"V":6} Version:6}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node1: Start executed for op.ID={1 7} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node0: Start executed for op.ID={0 9} op.command={Key:k Value:{"Id":2,"V":4} Version:4}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 25} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=25, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node1: Start executed for op.ID={1 8} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 25} applyOp.index=25; queueed.command={Key:k Value:{"Id":1,"V":0} Version:0} queued.id={2 25} queued.index=25; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 26} op.command={Key:k}. index=26, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node0: Start executed for op.ID={0 10} op.command={Key:k Value:{"Id":4,"V":6} Version:6}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 27} op.command={Key:k}. index=27, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 26} applyOp.index=26; queueed.command={Key:k} queued.id={2 26} queued.index=26; DoOP.result={Value:{"Id":4,"V":5} Version:6 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 27} applyOp.index=27; queueed.command={Key:k} queued.id={2 27} queued.index=27; DoOP.result={Value:{"Id":4,"V":5} Version:6 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 28} op.command={Key:k Value:{"Id":1,"V":6} Version:6}. index=28, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node1: Start executed for op.ID={1 9} op.command={Key:k Value:{"Id":2,"V":4} Version:4}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 29} op.command={Key:k Value:{"Id":3,"V":6} Version:6}. index=29, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":6} Version:6} applyOp.command.type=rpc.PutArgs applyOp.ID={2 28} applyOp.index=28; queueed.command={Key:k Value:{"Id":1,"V":6} Version:6} queued.id={2 28} queued.index=28; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":6} Version:6} applyOp.command.type=rpc.PutArgs applyOp.ID={2 29} applyOp.index=29; queueed.command={Key:k Value:{"Id":3,"V":6} Version:6} queued.id={2 29} queued.index=29; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 30} op.command={Key:k}. index=30, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 31} op.command={Key:k}. index=31, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 32} op.command={Key:k}. index=32, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 30} applyOp.index=30; queueed.command={Key:k} queued.id={2 30} queued.index=30; DoOP.result={Value:{"Id":1,"V":6} Version:7 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 31} applyOp.index=31; queueed.command={Key:k} queued.id={2 31} queued.index=31; DoOP.result={Value:{"Id":1,"V":6} Version:7 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 33} op.command={Key:k Value:{"Id":3,"V":7} Version:7}. index=33, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 32} applyOp.index=32; queueed.command={Key:k} queued.id={2 32} queued.index=32; DoOP.result={Value:{"Id":1,"V":6} Version:7 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":7} Version:7} applyOp.command.type=rpc.PutArgs applyOp.ID={2 33} applyOp.index=33; queueed.command={Key:k Value:{"Id":3,"V":7} Version:7} queued.id={2 33} queued.index=33; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node1: Start executed for op.ID={1 10} op.command={Key:k Value:{"Id":4,"V":6} Version:6}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 34} op.command={Key:k Value:{"Id":1,"V":7} Version:7}. index=34, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":7} Version:7} applyOp.command.type=rpc.PutArgs applyOp.ID={2 34} applyOp.index=34; queueed.command={Key:k Value:{"Id":1,"V":7} Version:7} queued.id={2 34} queued.index=34; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 35} op.command={Key:k}. index=35, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 35} applyOp.index=35; queueed.command={Key:k} queued.id={2 35} queued.index=35; DoOP.result={Value:{"Id":3,"V":7} Version:8 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 36} op.command={Key:k Value:{"Id":2,"V":4} Version:4}. index=36, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":4} Version:4} applyOp.command.type=rpc.PutArgs applyOp.ID={2 36} applyOp.index=36; queueed.command={Key:k Value:{"Id":2,"V":4} Version:4} queued.id={2 36} queued.index=36; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 37} op.command={Key:k Value:{"Id":1,"V":8} Version:8}. index=37, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 38} op.command={Key:k}. index=38, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":8} Version:8} applyOp.command.type=rpc.PutArgs applyOp.ID={2 37} applyOp.index=37; queueed.command={Key:k Value:{"Id":1,"V":8} Version:8} queued.id={2 37} queued.index=37; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 39} op.command={Key:k}. index=39, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 38} applyOp.index=38; queueed.command={Key:k} queued.id={2 38} queued.index=38; DoOP.result={Value:{"Id":1,"V":8} Version:9 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 39} applyOp.index=39; queueed.command={Key:k} queued.id={2 39} queued.index=39; DoOP.result={Value:{"Id":1,"V":8} Version:9 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:41 RSM node3: Start executed for op.ID={3 6} op.command={Key:k Value:{"Id":0,"V":7} Version:7}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node3: Start executed for op.ID={3 7} op.command={Key:k Value:{"Id":3,"V":7} Version:7}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 40} op.command={Key:k Value:{"Id":4,"V":6} Version:6}. index=40, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":6} Version:6} applyOp.command.type=rpc.PutArgs applyOp.ID={2 40} applyOp.index=40; queueed.command={Key:k Value:{"Id":4,"V":6} Version:6} queued.id={2 40} queued.index=40; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:41 RSM node2: Start executed for op.ID={2 41} op.command={Key:k}. index=41, term=1, isLeader=true
+2026/03/31 00:09:41 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 41} applyOp.index=41; queueed.command={Key:k} queued.id={2 41} queued.index=41; DoOP.result={Value:{"Id":1,"V":8} Version:9 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:42 RSM node4: Start executed for op.ID={4 6} op.command={Key:k Value:{"Id":0,"V":7} Version:7}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node4: Start executed for op.ID={4 7} op.command={Key:k Value:{"Id":3,"V":7} Version:7}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node0: Start executed for op.ID={0 11} op.command={Key:k Value:{"Id":0,"V":7} Version:7}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node0: Start executed for op.ID={0 12} op.command={Key:k Value:{"Id":3,"V":7} Version:7}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node1: Start executed for op.ID={1 11} op.command={Key:k Value:{"Id":0,"V":7} Version:7}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node1: Start executed for op.ID={1 12} op.command={Key:k Value:{"Id":3,"V":7} Version:7}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 42} op.command={Key:k Value:{"Id":0,"V":7} Version:7}. index=42, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":0,"V":7} Version:7} applyOp.command.type=rpc.PutArgs applyOp.ID={2 42} applyOp.index=42; queueed.command={Key:k Value:{"Id":0,"V":7} Version:7} queued.id={2 42} queued.index=42; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 43} op.command={Key:k}. index=43, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 43} applyOp.index=43; queueed.command={Key:k} queued.id={2 43} queued.index=43; DoOP.result={Value:{"Id":1,"V":8} Version:9 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 44} op.command={Key:k Value:{"Id":3,"V":7} Version:7}. index=44, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":7} Version:7} applyOp.command.type=rpc.PutArgs applyOp.ID={2 44} applyOp.index=44; queueed.command={Key:k Value:{"Id":3,"V":7} Version:7} queued.id={2 44} queued.index=44; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 45} op.command={Key:k}. index=45, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 45} applyOp.index=45; queueed.command={Key:k} queued.id={2 45} queued.index=45; DoOP.result={Value:{"Id":1,"V":8} Version:9 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:42 RSM node0: Start executed for op.ID={0 13} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node1: Start executed for op.ID={1 13} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 46} op.command={Key:k}. index=46, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 46} applyOp.index=46; queueed.command={Key:k} queued.id={2 46} queued.index=46; DoOP.result={Value:{"Id":1,"V":8} Version:9 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:42 RSM node0: Start executed for op.ID={0 14} op.command={Key:k Value:{"Id":4,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node0: Start executed for op.ID={0 15} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node0: Start executed for op.ID={0 16} op.command={Key:k Value:{"Id":0,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node0: Start executed for op.ID={0 17} op.command={Key:k Value:{"Id":2,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node0: Start executed for op.ID={0 18} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node1: Start executed for op.ID={1 14} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node1: Start executed for op.ID={1 15} op.command={Key:k Value:{"Id":4,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node1: Start executed for op.ID={1 16} op.command={Key:k Value:{"Id":2,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node1: Start executed for op.ID={1 17} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 47} op.command={Key:k Value:{"Id":0,"V":0} Version:0}. index=47, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 48} op.command={Key:k Value:{"Id":4,"V":0} Version:0}. index=48, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":0,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 47} applyOp.index=47; queueed.command={Key:k Value:{"Id":0,"V":0} Version:0} queued.id={2 47} queued.index=47; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 49} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=49, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 50} op.command={Key:k}. index=50, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 48} applyOp.index=48; queueed.command={Key:k Value:{"Id":4,"V":0} Version:0} queued.id={2 48} queued.index=48; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 49} applyOp.index=49; queueed.command={Key:k Value:{"Id":1,"V":0} Version:0} queued.id={2 49} queued.index=49; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 50} applyOp.index=50; queueed.command={Key:k} queued.id={2 50} queued.index=50; DoOP.result={Value:{"Id":1,"V":8} Version:9 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 51} op.command={Key:k}. index=51, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 52} op.command={Key:k Value:{"Id":2,"V":0} Version:0}. index=52, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 53} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=53, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 51} applyOp.index=51; queueed.command={Key:k} queued.id={2 51} queued.index=51; DoOP.result={Value:{"Id":1,"V":8} Version:9 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 52} applyOp.index=52; queueed.command={Key:k Value:{"Id":2,"V":0} Version:0} queued.id={2 52} queued.index=52; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 54} op.command={Key:k}. index=54, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: Start executed for op.ID={2 55} op.command={Key:k Value:{"Id":4,"V":9} Version:9}. index=55, term=1, isLeader=true
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 53} applyOp.index=53; queueed.command={Key:k Value:{"Id":3,"V":0} Version:0} queued.id={2 53} queued.index=53; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 54} applyOp.index=54; queueed.command={Key:k} queued.id={2 54} queued.index=54; DoOP.result={Value:{"Id":1,"V":8} Version:9 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:42 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":9} Version:9} applyOp.command.type=rpc.PutArgs applyOp.ID={2 55} applyOp.index=55; queueed.command={Key:k Value:{"Id":4,"V":9} Version:9} queued.id={2 55} queued.index=55; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 56} op.command={Key:k}. index=56, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 57} op.command={Key:k}. index=57, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 56} applyOp.index=56; queueed.command={Key:k} queued.id={2 56} queued.index=56; DoOP.result={Value:{"Id":4,"V":9} Version:10 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 58} op.command={Key:k Value:{"Id":2,"V":9} Version:9}. index=58, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 57} applyOp.index=57; queueed.command={Key:k} queued.id={2 57} queued.index=57; DoOP.result={Value:{"Id":4,"V":9} Version:10 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":9} Version:9} applyOp.command.type=rpc.PutArgs applyOp.ID={2 58} applyOp.index=58; queueed.command={Key:k Value:{"Id":2,"V":9} Version:9} queued.id={2 58} queued.index=58; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 59} op.command={Key:k}. index=59, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 60} op.command={Key:k Value:{"Id":4,"V":10} Version:10}. index=60, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 59} applyOp.index=59; queueed.command={Key:k} queued.id={2 59} queued.index=59; DoOP.result={Value:{"Id":4,"V":9} Version:10 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":10} Version:10} applyOp.command.type=rpc.PutArgs applyOp.ID={2 60} applyOp.index=60; queueed.command={Key:k Value:{"Id":4,"V":10} Version:10} queued.id={2 60} queued.index=60; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 61} op.command={Key:k}. index=61, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 61} applyOp.index=61; queueed.command={Key:k} queued.id={2 61} queued.index=61; DoOP.result={Value:{"Id":4,"V":10} Version:11 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 62} op.command={Key:k Value:{"Id":2,"V":10} Version:10}. index=62, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node3: Start executed for op.ID={3 8} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":10} Version:10} applyOp.command.type=rpc.PutArgs applyOp.ID={2 62} applyOp.index=62; queueed.command={Key:k Value:{"Id":2,"V":10} Version:10} queued.id={2 62} queued.index=62; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node3: Start executed for op.ID={3 9} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 63} op.command={Key:k}. index=63, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 63} applyOp.index=63; queueed.command={Key:k} queued.id={2 63} queued.index=63; DoOP.result={Value:{"Id":4,"V":10} Version:11 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 64} op.command={Key:k Value:{"Id":2,"V":11} Version:11}. index=64, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":11} Version:11} applyOp.command.type=rpc.PutArgs applyOp.ID={2 64} applyOp.index=64; queueed.command={Key:k Value:{"Id":2,"V":11} Version:11} queued.id={2 64} queued.index=64; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 65} op.command={Key:k}. index=65, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 65} applyOp.index=65; queueed.command={Key:k} queued.id={2 65} queued.index=65; DoOP.result={Value:{"Id":2,"V":11} Version:12 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node3: Start executed for op.ID={3 10} op.command={Key:k Value:{"Id":3,"V":10} Version:10}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node3: Start executed for op.ID={3 11} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node4: Start executed for op.ID={4 8} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node4: Start executed for op.ID={4 9} op.command={Key:k Value:{"Id":3,"V":10} Version:10}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node0: Start executed for op.ID={0 19} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node4: Start executed for op.ID={4 10} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node0: Start executed for op.ID={0 20} op.command={Key:k Value:{"Id":3,"V":10} Version:10}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node4: Start executed for op.ID={4 11} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node1: Start executed for op.ID={1 18} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node0: Start executed for op.ID={0 21} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node1: Start executed for op.ID={1 19} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node1: Start executed for op.ID={1 20} op.command={Key:k Value:{"Id":3,"V":10} Version:10}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node0: Start executed for op.ID={0 22} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 66} op.command={Key:k}. index=66, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 66} applyOp.index=66; queueed.command={Key:k} queued.id={2 66} queued.index=66; DoOP.result={Value:{"Id":2,"V":11} Version:12 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 67} op.command={Key:k}. index=67, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node1: Start executed for op.ID={1 21} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 67} applyOp.index=67; queueed.command={Key:k} queued.id={2 67} queued.index=67; DoOP.result={Value:{"Id":2,"V":11} Version:12 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 68} op.command={Key:k Value:{"Id":1,"V":12} Version:12}. index=68, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":12} Version:12} applyOp.command.type=rpc.PutArgs applyOp.ID={2 68} applyOp.index=68; queueed.command={Key:k Value:{"Id":1,"V":12} Version:12} queued.id={2 68} queued.index=68; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 69} op.command={Key:k Value:{"Id":3,"V":10} Version:10}. index=69, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 70} op.command={Key:k}. index=70, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":10} Version:10} applyOp.command.type=rpc.PutArgs applyOp.ID={2 69} applyOp.index=69; queueed.command={Key:k Value:{"Id":3,"V":10} Version:10} queued.id={2 69} queued.index=69; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node1: Start executed for op.ID={1 22} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 70} applyOp.index=70; queueed.command={Key:k} queued.id={2 70} queued.index=70; DoOP.result={Value:{"Id":1,"V":12} Version:13 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 71} op.command={Key:k}. index=71, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 72} op.command={Key:k Value:{"Id":1,"V":13} Version:13}. index=72, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 71} applyOp.index=71; queueed.command={Key:k} queued.id={2 71} queued.index=71; DoOP.result={Value:{"Id":1,"V":12} Version:13 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node3: Start executed for op.ID={3 12} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":13} Version:13} applyOp.command.type=rpc.PutArgs applyOp.ID={2 72} applyOp.index=72; queueed.command={Key:k Value:{"Id":1,"V":13} Version:13} queued.id={2 72} queued.index=72; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 73} op.command={Key:k Value:{"Id":3,"V":13} Version:13}. index=73, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 74} op.command={Key:k}. index=74, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":13} Version:13} applyOp.command.type=rpc.PutArgs applyOp.ID={2 73} applyOp.index=73; queueed.command={Key:k Value:{"Id":3,"V":13} Version:13} queued.id={2 73} queued.index=73; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 75} op.command={Key:k}. index=75, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 74} applyOp.index=74; queueed.command={Key:k} queued.id={2 74} queued.index=74; DoOP.result={Value:{"Id":1,"V":13} Version:14 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 75} applyOp.index=75; queueed.command={Key:k} queued.id={2 75} queued.index=75; DoOP.result={Value:{"Id":1,"V":13} Version:14 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 76} op.command={Key:k}. index=76, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 76} applyOp.index=76; queueed.command={Key:k} queued.id={2 76} queued.index=76; DoOP.result={Value:{"Id":1,"V":13} Version:14 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 77} op.command={Key:k Value:{"Id":1,"V":14} Version:14}. index=77, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 78} op.command={Key:k Value:{"Id":4,"V":14} Version:14}. index=78, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":14} Version:14} applyOp.command.type=rpc.PutArgs applyOp.ID={2 77} applyOp.index=77; queueed.command={Key:k Value:{"Id":1,"V":14} Version:14} queued.id={2 77} queued.index=77; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 79} op.command={Key:k Value:{"Id":3,"V":14} Version:14}. index=79, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 80} op.command={Key:k}. index=80, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":14} Version:14} applyOp.command.type=rpc.PutArgs applyOp.ID={2 78} applyOp.index=78; queueed.command={Key:k Value:{"Id":4,"V":14} Version:14} queued.id={2 78} queued.index=78; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 81} op.command={Key:k}. index=81, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":14} Version:14} applyOp.command.type=rpc.PutArgs applyOp.ID={2 79} applyOp.index=79; queueed.command={Key:k Value:{"Id":3,"V":14} Version:14} queued.id={2 79} queued.index=79; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 80} applyOp.index=80; queueed.command={Key:k} queued.id={2 80} queued.index=80; DoOP.result={Value:{"Id":1,"V":14} Version:15 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 82} op.command={Key:k}. index=82, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 81} applyOp.index=81; queueed.command={Key:k} queued.id={2 81} queued.index=81; DoOP.result={Value:{"Id":1,"V":14} Version:15 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 83} op.command={Key:k Value:{"Id":4,"V":15} Version:15}. index=83, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 84} op.command={Key:k}. index=84, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 82} applyOp.index=82; queueed.command={Key:k} queued.id={2 82} queued.index=82; DoOP.result={Value:{"Id":1,"V":14} Version:15 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":15} Version:15} applyOp.command.type=rpc.PutArgs applyOp.ID={2 83} applyOp.index=83; queueed.command={Key:k Value:{"Id":4,"V":15} Version:15} queued.id={2 83} queued.index=83; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 85} op.command={Key:k Value:{"Id":1,"V":15} Version:15}. index=85, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 84} applyOp.index=84; queueed.command={Key:k} queued.id={2 84} queued.index=84; DoOP.result={Value:{"Id":4,"V":15} Version:16 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":15} Version:15} applyOp.command.type=rpc.PutArgs applyOp.ID={2 85} applyOp.index=85; queueed.command={Key:k Value:{"Id":1,"V":15} Version:15} queued.id={2 85} queued.index=85; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node4: Start executed for op.ID={4 12} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 86} op.command={Key:k Value:{"Id":3,"V":15} Version:15}. index=86, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 87} op.command={Key:k}. index=87, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":15} Version:15} applyOp.command.type=rpc.PutArgs applyOp.ID={2 86} applyOp.index=86; queueed.command={Key:k Value:{"Id":3,"V":15} Version:15} queued.id={2 86} queued.index=86; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 88} op.command={Key:k}. index=88, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 87} applyOp.index=87; queueed.command={Key:k} queued.id={2 87} queued.index=87; DoOP.result={Value:{"Id":4,"V":15} Version:16 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 88} applyOp.index=88; queueed.command={Key:k} queued.id={2 88} queued.index=88; DoOP.result={Value:{"Id":4,"V":15} Version:16 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 89} op.command={Key:k Value:{"Id":1,"V":16} Version:16}. index=89, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 90} op.command={Key:k Value:{"Id":3,"V":16} Version:16}. index=90, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":16} Version:16} applyOp.command.type=rpc.PutArgs applyOp.ID={2 89} applyOp.index=89; queueed.command={Key:k Value:{"Id":1,"V":16} Version:16} queued.id={2 89} queued.index=89; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":16} Version:16} applyOp.command.type=rpc.PutArgs applyOp.ID={2 90} applyOp.index=90; queueed.command={Key:k Value:{"Id":3,"V":16} Version:16} queued.id={2 90} queued.index=90; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 91} op.command={Key:k}. index=91, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 91} applyOp.index=91; queueed.command={Key:k} queued.id={2 91} queued.index=91; DoOP.result={Value:{"Id":1,"V":16} Version:17 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 92} op.command={Key:k Value:{"Id":3,"V":17} Version:17}. index=92, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":17} Version:17} applyOp.command.type=rpc.PutArgs applyOp.ID={2 92} applyOp.index=92; queueed.command={Key:k Value:{"Id":3,"V":17} Version:17} queued.id={2 92} queued.index=92; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:43 RSM node3: Start executed for op.ID={3 13} op.command={Key:k Value:{"Id":4,"V":15} Version:15}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node2: Start executed for op.ID={2 93} op.command={Key:k}. index=93, term=1, isLeader=true
+2026/03/31 00:09:43 RSM node0: Start executed for op.ID={0 23} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 93} applyOp.index=93; queueed.command={Key:k} queued.id={2 93} queued.index=93; DoOP.result={Value:{"Id":3,"V":17} Version:18 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:43 RSM node4: Start executed for op.ID={4 13} op.command={Key:k Value:{"Id":4,"V":15} Version:15}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node3: Start executed for op.ID={3 14} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:43 RSM node1: Start executed for op.ID={1 23} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:44 RSM node0: Start executed for op.ID={0 24} op.command={Key:k Value:{"Id":4,"V":15} Version:15}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:44 RSM node2: Start executed for op.ID={2 94} op.command={Key:k}. index=94, term=1, isLeader=true
+2026/03/31 00:09:44 RSM node4: Start executed for op.ID={4 14} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:44 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 94} applyOp.index=94; queueed.command={Key:k} queued.id={2 94} queued.index=94; DoOP.result={Value:{"Id":3,"V":17} Version:18 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:44 RSM node1: Start executed for op.ID={1 24} op.command={Key:k Value:{"Id":4,"V":15} Version:15}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:44 RSM node0: Start executed for op.ID={0 25} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:44 RSM node2: Start executed for op.ID={2 95} op.command={Key:k Value:{"Id":4,"V":15} Version:15}. index=95, term=1, isLeader=true
+2026/03/31 00:09:44 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":15} Version:15} applyOp.command.type=rpc.PutArgs applyOp.ID={2 95} applyOp.index=95; queueed.command={Key:k Value:{"Id":4,"V":15} Version:15} queued.id={2 95} queued.index=95; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:44 RSM node2: Start executed for op.ID={2 96} op.command={Key:k}. index=96, term=1, isLeader=true
+2026/03/31 00:09:44 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 96} applyOp.index=96; queueed.command={Key:k} queued.id={2 96} queued.index=96; DoOP.result={Value:{"Id":3,"V":17} Version:18 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:44 RSM node3: Start executed for op.ID={3 15} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:44 RSM node4: Start executed for op.ID={4 15} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:44 RSM node0: Start executed for op.ID={0 26} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:44 RSM node1: Start executed for op.ID={1 25} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:44 RSM node2: Start executed for op.ID={2 97} op.command={Key:k}. index=97, term=1, isLeader=true
+2026/03/31 00:09:44 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 97} applyOp.index=97; queueed.command={Key:k} queued.id={2 97} queued.index=97; DoOP.result={Value:{"Id":3,"V":17} Version:18 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node3: Start executed for op.ID={3 16} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node4: Start executed for op.ID={4 16} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node0: Start executed for op.ID={0 27} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node1: Start executed for op.ID={1 26} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 98} op.command={Key:k}. index=98, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 98} applyOp.index=98; queueed.command={Key:k} queued.id={2 98} queued.index=98; DoOP.result={Value:{"Id":3,"V":17} Version:18 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node0: Start executed for op.ID={0 28} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node0: Start executed for op.ID={0 29} op.command={Key:k Value:{"Id":2,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node0: Start executed for op.ID={0 30} op.command={Key:k Value:{"Id":4,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node0: Start executed for op.ID={0 31} op.command={Key:k Value:{"Id":0,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node0: Start executed for op.ID={0 32} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node1: Start executed for op.ID={1 27} op.command={Key:k Value:{"Id":0,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node1: Start executed for op.ID={1 28} op.command={Key:k Value:{"Id":4,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node1: Start executed for op.ID={1 29} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 99} op.command={Key:k Value:{"Id":1,"V":0} Version:0}. index=99, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 99} applyOp.index=99; queueed.command={Key:k Value:{"Id":1,"V":0} Version:0} queued.id={2 99} queued.index=99; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 100} op.command={Key:k}. index=100, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 101} op.command={Key:k Value:{"Id":2,"V":0} Version:0}. index=101, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 102} op.command={Key:k Value:{"Id":0,"V":0} Version:0}. index=102, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 100} applyOp.index=100; queueed.command={Key:k} queued.id={2 100} queued.index=100; DoOP.result={Value:{"Id":3,"V":17} Version:18 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 103} op.command={Key:k Value:{"Id":1,"V":18} Version:18}. index=103, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 101} applyOp.index=101; queueed.command={Key:k Value:{"Id":2,"V":0} Version:0} queued.id={2 101} queued.index=101; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 104} op.command={Key:k Value:{"Id":4,"V":0} Version:0}. index=104, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":0,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 102} applyOp.index=102; queueed.command={Key:k Value:{"Id":0,"V":0} Version:0} queued.id={2 102} queued.index=102; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":18} Version:18} applyOp.command.type=rpc.PutArgs applyOp.ID={2 103} applyOp.index=103; queueed.command={Key:k Value:{"Id":1,"V":18} Version:18} queued.id={2 103} queued.index=103; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 105} op.command={Key:k}. index=105, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 104} applyOp.index=104; queueed.command={Key:k Value:{"Id":4,"V":0} Version:0} queued.id={2 104} queued.index=104; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 106} op.command={Key:k}. index=106, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 105} applyOp.index=105; queueed.command={Key:k} queued.id={2 105} queued.index=105; DoOP.result={Value:{"Id":1,"V":18} Version:19 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 107} op.command={Key:k}. index=107, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 106} applyOp.index=106; queueed.command={Key:k} queued.id={2 106} queued.index=106; DoOP.result={Value:{"Id":1,"V":18} Version:19 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 108} op.command={Key:k}. index=108, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 109} op.command={Key:k Value:{"Id":2,"V":19} Version:19}. index=109, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 107} applyOp.index=107; queueed.command={Key:k} queued.id={2 107} queued.index=107; DoOP.result={Value:{"Id":1,"V":18} Version:19 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 108} applyOp.index=108; queueed.command={Key:k} queued.id={2 108} queued.index=108; DoOP.result={Value:{"Id":1,"V":18} Version:19 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 110} op.command={Key:k Value:{"Id":4,"V":19} Version:19}. index=110, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":19} Version:19} applyOp.command.type=rpc.PutArgs applyOp.ID={2 109} applyOp.index=109; queueed.command={Key:k Value:{"Id":2,"V":19} Version:19} queued.id={2 109} queued.index=109; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":19} Version:19} applyOp.command.type=rpc.PutArgs applyOp.ID={2 110} applyOp.index=110; queueed.command={Key:k Value:{"Id":4,"V":19} Version:19} queued.id={2 110} queued.index=110; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 111} op.command={Key:k}. index=111, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 112} op.command={Key:k}. index=112, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 111} applyOp.index=111; queueed.command={Key:k} queued.id={2 111} queued.index=111; DoOP.result={Value:{"Id":2,"V":19} Version:20 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 112} applyOp.index=112; queueed.command={Key:k} queued.id={2 112} queued.index=112; DoOP.result={Value:{"Id":2,"V":19} Version:20 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 113} op.command={Key:k Value:{"Id":4,"V":20} Version:20}. index=113, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 114} op.command={Key:k Value:{"Id":2,"V":20} Version:20}. index=114, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":20} Version:20} applyOp.command.type=rpc.PutArgs applyOp.ID={2 113} applyOp.index=113; queueed.command={Key:k Value:{"Id":4,"V":20} Version:20} queued.id={2 113} queued.index=113; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":20} Version:20} applyOp.command.type=rpc.PutArgs applyOp.ID={2 114} applyOp.index=114; queueed.command={Key:k Value:{"Id":2,"V":20} Version:20} queued.id={2 114} queued.index=114; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 115} op.command={Key:k}. index=115, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 116} op.command={Key:k}. index=116, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 115} applyOp.index=115; queueed.command={Key:k} queued.id={2 115} queued.index=115; DoOP.result={Value:{"Id":4,"V":20} Version:21 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 116} applyOp.index=116; queueed.command={Key:k} queued.id={2 116} queued.index=116; DoOP.result={Value:{"Id":4,"V":20} Version:21 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 117} op.command={Key:k Value:{"Id":4,"V":21} Version:21}. index=117, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 118} op.command={Key:k Value:{"Id":2,"V":21} Version:21}. index=118, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":21} Version:21} applyOp.command.type=rpc.PutArgs applyOp.ID={2 117} applyOp.index=117; queueed.command={Key:k Value:{"Id":4,"V":21} Version:21} queued.id={2 117} queued.index=117; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node3: Start executed for op.ID={3 17} op.command={Key:k Value:{"Id":1,"V":19} Version:19}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node3: Start executed for op.ID={3 18} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":21} Version:21} applyOp.command.type=rpc.PutArgs applyOp.ID={2 118} applyOp.index=118; queueed.command={Key:k Value:{"Id":2,"V":21} Version:21} queued.id={2 118} queued.index=118; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node3: Start executed for op.ID={3 19} op.command={Key:k Value:{"Id":0,"V":19} Version:19}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node4: Start executed for op.ID={4 17} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node4: Start executed for op.ID={4 18} op.command={Key:k Value:{"Id":1,"V":19} Version:19}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node4: Start executed for op.ID={4 19} op.command={Key:k Value:{"Id":0,"V":19} Version:19}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node3: Start executed for op.ID={3 20} op.command={Key:k Value:{"Id":2,"V":21} Version:21}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node3: Start executed for op.ID={3 21} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node0: Start executed for op.ID={0 33} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node0: Start executed for op.ID={0 34} op.command={Key:k Value:{"Id":0,"V":19} Version:19}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node0: Start executed for op.ID={0 35} op.command={Key:k Value:{"Id":1,"V":19} Version:19}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node1: Start executed for op.ID={1 30} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node1: Start executed for op.ID={1 31} op.command={Key:k Value:{"Id":1,"V":19} Version:19}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node0: Start executed for op.ID={0 36} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node0: Start executed for op.ID={0 37} op.command={Key:k Value:{"Id":2,"V":21} Version:21}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 119} op.command={Key:k Value:{"Id":3,"V":0} Version:0}. index=119, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":0} Version:0} applyOp.command.type=rpc.PutArgs applyOp.ID={2 119} applyOp.index=119; queueed.command={Key:k Value:{"Id":3,"V":0} Version:0} queued.id={2 119} queued.index=119; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 120} op.command={Key:k}. index=120, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node1: Start executed for op.ID={1 32} op.command={Key:k}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 121} op.command={Key:k Value:{"Id":1,"V":19} Version:19}. index=121, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 120} applyOp.index=120; queueed.command={Key:k} queued.id={2 120} queued.index=120; DoOP.result={Value:{"Id":4,"V":21} Version:22 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node1: Start executed for op.ID={1 33} op.command={Key:k Value:{"Id":2,"V":21} Version:21}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 122} op.command={Key:k Value:{"Id":3,"V":22} Version:22}. index=122, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":19} Version:19} applyOp.command.type=rpc.PutArgs applyOp.ID={2 121} applyOp.index=121; queueed.command={Key:k Value:{"Id":1,"V":19} Version:19} queued.id={2 121} queued.index=121; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 123} op.command={Key:k}. index=123, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":22} Version:22} applyOp.command.type=rpc.PutArgs applyOp.ID={2 122} applyOp.index=122; queueed.command={Key:k Value:{"Id":3,"V":22} Version:22} queued.id={2 122} queued.index=122; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 123} applyOp.index=123; queueed.command={Key:k} queued.id={2 123} queued.index=123; DoOP.result={Value:{"Id":3,"V":22} Version:23 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 124} op.command={Key:k}. index=124, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 125} op.command={Key:k Value:{"Id":1,"V":23} Version:23}. index=125, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 124} applyOp.index=124; queueed.command={Key:k} queued.id={2 124} queued.index=124; DoOP.result={Value:{"Id":3,"V":22} Version:23 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":23} Version:23} applyOp.command.type=rpc.PutArgs applyOp.ID={2 125} applyOp.index=125; queueed.command={Key:k Value:{"Id":1,"V":23} Version:23} queued.id={2 125} queued.index=125; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:46 RSM node3: Start executed for op.ID={3 22} op.command={Key:k Value:{"Id":0,"V":19} Version:19}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 126} op.command={Key:k Value:{"Id":3,"V":23} Version:23}. index=126, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 127} op.command={Key:k}. index=127, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":23} Version:23} applyOp.command.type=rpc.PutArgs applyOp.ID={2 126} applyOp.index=126; queueed.command={Key:k Value:{"Id":3,"V":23} Version:23} queued.id={2 126} queued.index=126; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 128} op.command={Key:k}. index=128, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 127} applyOp.index=127; queueed.command={Key:k} queued.id={2 127} queued.index=127; DoOP.result={Value:{"Id":1,"V":23} Version:24 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 128} applyOp.index=128; queueed.command={Key:k} queued.id={2 128} queued.index=128; DoOP.result={Value:{"Id":1,"V":23} Version:24 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 129} op.command={Key:k Value:{"Id":1,"V":24} Version:24}. index=129, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 130} op.command={Key:k Value:{"Id":4,"V":24} Version:24}. index=130, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 131} op.command={Key:k Value:{"Id":2,"V":21} Version:21}. index=131, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 132} op.command={Key:k}. index=132, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":1,"V":24} Version:24} applyOp.command.type=rpc.PutArgs applyOp.ID={2 129} applyOp.index=129; queueed.command={Key:k Value:{"Id":1,"V":24} Version:24} queued.id={2 129} queued.index=129; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":24} Version:24} applyOp.command.type=rpc.PutArgs applyOp.ID={2 130} applyOp.index=130; queueed.command={Key:k Value:{"Id":4,"V":24} Version:24} queued.id={2 130} queued.index=130; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 133} op.command={Key:k}. index=133, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":2,"V":21} Version:21} applyOp.command.type=rpc.PutArgs applyOp.ID={2 131} applyOp.index=131; queueed.command={Key:k Value:{"Id":2,"V":21} Version:21} queued.id={2 131} queued.index=131; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 132} applyOp.index=132; queueed.command={Key:k} queued.id={2 132} queued.index=132; DoOP.result={Value:{"Id":1,"V":24} Version:25 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 133} applyOp.index=133; queueed.command={Key:k} queued.id={2 133} queued.index=133; DoOP.result={Value:{"Id":1,"V":24} Version:25 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 134} op.command={Key:k}. index=134, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 135} op.command={Key:k}. index=135, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 136} op.command={Key:k Value:{"Id":3,"V":25} Version:25}. index=136, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 134} applyOp.index=134; queueed.command={Key:k} queued.id={2 134} queued.index=134; DoOP.result={Value:{"Id":1,"V":24} Version:25 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 135} applyOp.index=135; queueed.command={Key:k} queued.id={2 135} queued.index=135; DoOP.result={Value:{"Id":1,"V":24} Version:25 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 137} op.command={Key:k Value:{"Id":4,"V":25} Version:25}. index=137, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":3,"V":25} Version:25} applyOp.command.type=rpc.PutArgs applyOp.ID={2 136} applyOp.index=136; queueed.command={Key:k Value:{"Id":3,"V":25} Version:25} queued.id={2 136} queued.index=136; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 138} op.command={Key:k}. index=138, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":25} Version:25} applyOp.command.type=rpc.PutArgs applyOp.ID={2 137} applyOp.index=137; queueed.command={Key:k Value:{"Id":4,"V":25} Version:25} queued.id={2 137} queued.index=137; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 138} applyOp.index=138; queueed.command={Key:k} queued.id={2 138} queued.index=138; DoOP.result={Value:{"Id":3,"V":25} Version:26 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node4: Start executed for op.ID={4 20} op.command={Key:k Value:{"Id":0,"V":19} Version:19}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 139} op.command={Key:k}. index=139, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 139} applyOp.index=139; queueed.command={Key:k} queued.id={2 139} queued.index=139; DoOP.result={Value:{"Id":3,"V":25} Version:26 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 140} op.command={Key:k Value:{"Id":4,"V":26} Version:26}. index=140, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":4,"V":26} Version:26} applyOp.command.type=rpc.PutArgs applyOp.ID={2 140} applyOp.index=140; queueed.command={Key:k Value:{"Id":4,"V":26} Version:26} queued.id={2 140} queued.index=140; DoOP.result={Err:OK} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:46 RSM node2: Start executed for op.ID={2 141} op.command={Key:k}. index=141, term=1, isLeader=true
+2026/03/31 00:09:46 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 141} applyOp.index=141; queueed.command={Key:k} queued.id={2 141} queued.index=141; DoOP.result={Value:{"Id":4,"V":26} Version:27 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:46 RSM node0: Start executed for op.ID={0 38} op.command={Key:k Value:{"Id":0,"V":19} Version:19}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:46 RSM node1: Start executed for op.ID={1 34} op.command={Key:k Value:{"Id":0,"V":19} Version:19}. index=-1, term=1, isLeader=false
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 142} op.command={Key:k Value:{"Id":0,"V":19} Version:19}. index=142, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k Value:{"Id":0,"V":19} Version:19} applyOp.command.type=rpc.PutArgs applyOp.ID={2 142} applyOp.index=142; queueed.command={Key:k Value:{"Id":0,"V":19} Version:19} queued.id={2 142} queued.index=142; DoOP.result={Err:ErrVersion} DoOP.result.type=rpc.PutReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 143} op.command={Key:k}. index=143, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 143} applyOp.index=143; queueed.command={Key:k} queued.id={2 143} queued.index=143; DoOP.result={Value:{"Id":4,"V":26} Version:27 Err:OK} DoOP.result.type=rpc.GetReply
+2026/03/31 00:09:45 RSM node2: Start executed for op.ID={2 144} op.command={Key:k}. index=144, term=1, isLeader=true
+2026/03/31 00:09:45 RSM node2: READER: sending OK response. applyOp.command={Key:k} applyOp.command.type=rpc.GetArgs applyOp.ID={2 144} applyOp.index=144; queueed.command={Key:k} queued.id={2 144} queued.index=144; DoOP.result={Value:{"Id":4,"V":26} Version:27 Err:OK} DoOP.result.type=rpc.GetReply
+info: wrote history visualization to /tmp/porcupine-1810118312.html
+--- FAIL: TestUnreliable4B (6.08s)
+    porcupine.go:112: history is not linearizable
+FAIL
+exit status 1
+FAIL	6.5840/kvraft1	6.087s
