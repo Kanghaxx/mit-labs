@@ -10,8 +10,8 @@ import (
 	"github.com/anishathalye/porcupine"
 
 	"6.5840/kvsrv1/rpc"
-	"6.5840/models1"
-	"6.5840/tester1"
+	models "6.5840/models1"
+	tester "6.5840/tester1"
 )
 
 const linearizabilityCheckTimeout = 1 * time.Second
@@ -86,7 +86,17 @@ func Put(cfg *tester.Config, ck IKVClerk, key string, value string, version rpc.
 func checkPorcupine(t *testing.T, opLog *OpLog, nsec time.Duration) {
 	enabled := os.Getenv("VIS_ENABLE")
 	fpath := os.Getenv("VIS_FILE")
-	res, info := porcupine.CheckOperationsVerbose(models.KvModel, opLog.Read(), nsec)
+
+	// Filter out operations with nil inputs
+	ops := opLog.Read()
+	var validOps []porcupine.Operation
+	for _, op := range ops {
+		if op.Input != nil {
+			validOps = append(validOps, op)
+		}
+	}
+
+	res, info := porcupine.CheckOperationsVerbose(models.KvModel, validOps, nsec)
 	if res == porcupine.Illegal {
 		var file *os.File
 		var err error
@@ -94,7 +104,7 @@ func checkPorcupine(t *testing.T, opLog *OpLog, nsec time.Duration) {
 			// Save the vis file in a temporary file.
 			file, err = os.CreateTemp("", "porcupine-*.html")
 		} else {
-			file, err = os.OpenFile(fpath, os.O_RDWR | os.O_CREATE | os.O_TRUNC, 0644)
+			file, err = os.OpenFile(fpath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 		}
 		if err != nil {
 			fmt.Printf("info: failed to open visualization file %s (%v)\n", fpath, err)
@@ -122,7 +132,7 @@ func checkPorcupine(t *testing.T, opLog *OpLog, nsec time.Duration) {
 			// Save the vis file in a temporary file.
 			file, err = os.CreateTemp("", "porcupine-*.html")
 		} else {
-			file, err = os.OpenFile(fpath, os.O_RDWR | os.O_CREATE | os.O_TRUNC, 0644)
+			file, err = os.OpenFile(fpath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 		}
 		if err != nil {
 			fmt.Printf("info: failed to open visualization file %s (%v)\n", fpath, err)

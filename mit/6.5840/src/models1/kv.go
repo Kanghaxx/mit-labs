@@ -1,9 +1,11 @@
 package models
 
-import "github.com/anishathalye/porcupine"
+import (
+	"fmt"
+	"sort"
 
-import "fmt"
-import "sort"
+	"github.com/anishathalye/porcupine"
+)
 
 type KvInput struct {
 	Op      uint8 // 0 => get, 1 => put
@@ -27,6 +29,10 @@ var KvModel = porcupine.Model{
 	Partition: func(history []porcupine.Operation) [][]porcupine.Operation {
 		m := make(map[string][]porcupine.Operation)
 		for _, v := range history {
+			// Skip nil inputs - they should have been filtered out before reaching here
+			if v.Input == nil {
+				continue
+			}
 			key := v.Input.(KvInput).Key
 			m[key] = append(m[key], v)
 		}
