@@ -72,3 +72,24 @@ func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// Claude: fails with the same error
+// func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
+// 	args := rpc.PutArgs{Key: key, Value: value, Version: version}
+// 	maybeApplied := false // true only after a confirmed network loss post-send
+// 	for {
+// 		reply := rpc.PutReply{}
+// 		ok := ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
+// 		if ok {
+// 			// Got a real reply
+// 			if maybeApplied && reply.Err == rpc.ErrVersion {
+// 				// We lost the reply last time; server had already applied it
+// 				return rpc.ErrMaybe
+// 			}
+// 			return reply.Err
+// 		}
+// 		// Network failure — the request may or may not have been applied
+// 		maybeApplied = true
+// 		time.Sleep(10 * time.Millisecond)
+// 	}
+// }
