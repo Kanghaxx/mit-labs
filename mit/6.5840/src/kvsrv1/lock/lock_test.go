@@ -1,8 +1,8 @@
 package lock
 
 import (
-	"fmt"
 	//	"log"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -18,15 +18,63 @@ const (
 	NSEC     = 2
 )
 
-func oneClient(t *testing.T, me int, ck kvtest.IKVClerk, done chan struct{}) kvtest.ClntRes {
-	lk := MakeLock(ck, "l")
+func TestReliableBasic(t *testing.T) {
+	ts := kvsrv.MakeTestKV(t, true)
+	defer ts.Cleanup()
+
+	ts.Begin(fmt.Sprintf("Test: a single Acquire and Release"))
+
+	name1 := kvtest.RandValue(12)
+	ck := ts.MakeClerk()
+	lk1 := MakeLock(ck, name1)
+	lk1.Acquire()
+	lk1.Release()
+}
+
+// check that locks with different names can
+// be held at the same time.
+func TestReliableNested(t *testing.T) {
+	ts := kvsrv.MakeTestKV(t, true)
+	defer ts.Cleanup()
+
+	ts.Begin(fmt.Sprintf("Test: one client, two locks"))
+
+	name1 := kvtest.RandValue(12)
+	name2 := kvtest.RandValue(12)
+	ck := ts.MakeClerk()
+	lk1 := MakeLock(ck, name1)
+	lk2 := MakeLock(ck, name2)
+
+	lk1.Acquire()
+	lk2.Acquire()
+	lk2.Release()
+	lk1.Release()
+
+	lk2.Acquire()
+	lk1.Acquire()
+	lk1.Release()
+	lk1.Acquire()
+	lk2.Release()
+	lk1.Release()
+}
+
+func oneClient(t *testing.T, me int, ck kvtest.IKVClerk,
+	done chan struct{}, name1 string, name2 string) kvtest.ClntRes {
+	lk1 := MakeLock(ck, name1)
+	lk2 := MakeLock(ck, name2)
+
+	lk1.Acquire()
+	lk2.Acquire()
+	lk1.Release()
+	lk2.Release()
+
 	ck.Put("l0", "", 0)
 	for i := 1; true; i++ {
 		select {
 		case <-done:
 			return kvtest.ClntRes{i, 0}
 		default:
-			lk.Acquire()
+			lk1.Acquire()
 
 			// log.Printf("%d: acquired lock", me)
 
@@ -54,7 +102,7 @@ func oneClient(t *testing.T, me int, ck kvtest.IKVClerk, done chan struct{}) kvt
 
 			// log.Printf("%d: release lock", me)
 
-			lk.Release()
+			lk1.Release()
 		}
 	}
 	return kvtest.ClntRes{}
@@ -67,8 +115,11 @@ func runClients(t *testing.T, nclnt int, reliable bool) {
 
 	ts.Begin(fmt.Sprintf("Test: %d lock clients", nclnt))
 
+	name1 := kvtest.RandValue(12)
+	name2 := kvtest.RandValue(12)
+
 	ts.SpawnClientsAndWait(nclnt, NSEC*time.Second, func(me int, myck kvtest.IKVClerk, done chan struct{}) kvtest.ClntRes {
-		return oneClient(t, me, myck, done)
+		return oneClient(t, me, myck, done, name1, name2)
 	})
 }
 

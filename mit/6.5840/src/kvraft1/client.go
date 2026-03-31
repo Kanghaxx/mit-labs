@@ -13,14 +13,18 @@ type Clerk struct {
 	mu      sync.Mutex
 	clnt    *tester.Clnt
 	servers []string
-	// You will have to modify this struct.
-	leader int
+	leader  int // last successful leader (index into servers[])
+	// You can add to this struct.
 }
 
 func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
 	ck := &Clerk{clnt: clnt, servers: servers}
 	// You'll have to add code here.
 	return ck
+}
+
+func (ck *Clerk) Leader() int {
+	return ck.leader
 }
 
 // Get fetches the current value and version for a key.  It returns

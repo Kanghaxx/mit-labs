@@ -51,7 +51,7 @@ func Get(cfg *tester.Config, ck IKVClerk, key string, log *OpLog, cli int) (stri
 	start := int64(time.Since(t0))
 	val, ver, err := ck.Get(key)
 	end := int64(time.Since(t0))
-	cfg.Op()
+	cfg.OpInc()
 	if log != nil {
 		log.Append(porcupine.Operation{
 			Input:    models.KvInput{Op: 0, Key: key},
@@ -68,7 +68,7 @@ func Put(cfg *tester.Config, ck IKVClerk, key string, value string, version rpc.
 	start := int64(time.Since(t0))
 	err := ck.Put(key, value, version)
 	end := int64(time.Since(t0))
-	cfg.Op()
+	cfg.OpInc()
 	if log != nil {
 		log.Append(porcupine.Operation{
 			Input:    models.KvInput{Op: 1, Key: key, Value: value, Version: uint64(version)},
@@ -94,7 +94,7 @@ func checkPorcupine(t *testing.T, opLog *OpLog, nsec time.Duration) {
 			// Save the vis file in a temporary file.
 			file, err = os.CreateTemp("", "porcupine-*.html")
 		} else {
-			file, err = os.OpenFile(fpath, os.O_RDWR | os.O_CREATE | os.O_TRUNC, 0644)
+			file, err = os.OpenFile(fpath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 		}
 		if err != nil {
 			fmt.Printf("info: failed to open visualization file %s (%v)\n", fpath, err)
@@ -122,7 +122,7 @@ func checkPorcupine(t *testing.T, opLog *OpLog, nsec time.Duration) {
 			// Save the vis file in a temporary file.
 			file, err = os.CreateTemp("", "porcupine-*.html")
 		} else {
-			file, err = os.OpenFile(fpath, os.O_RDWR | os.O_CREATE | os.O_TRUNC, 0644)
+			file, err = os.OpenFile(fpath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 		}
 		if err != nil {
 			fmt.Printf("info: failed to open visualization file %s (%v)\n", fpath, err)
@@ -144,7 +144,7 @@ func (ts *Test) Get(ck IKVClerk, key string, cli int) (string, rpc.Tversion, rpc
 	start := int64(time.Since(t0))
 	val, ver, err := ck.Get(key)
 	end := int64(time.Since(t0))
-	ts.Op()
+	ts.OpInc()
 	if ts.oplog != nil {
 		ts.oplog.Append(porcupine.Operation{
 			Input:    models.KvInput{Op: 0, Key: key},
@@ -162,7 +162,6 @@ func (ts *Test) Put(ck IKVClerk, key string, value string, version rpc.Tversion,
 	start := int64(time.Since(t0))
 	err := ck.Put(key, value, version)
 	end := int64(time.Since(t0))
-	ts.Op()
 	if ts.oplog != nil {
 		ts.oplog.Append(porcupine.Operation{
 			Input:    models.KvInput{Op: 1, Key: key, Value: value, Version: uint64(version)},

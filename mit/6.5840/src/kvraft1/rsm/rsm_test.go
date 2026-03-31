@@ -1,14 +1,14 @@
 package rsm
 
 import (
-	//"log"
 	"fmt"
+	"log"
 	"sync"
 	"testing"
 	"time"
 
 	"6.5840/kvsrv1/rpc"
-	tester "6.5840/tester1"
+	"6.5840/tester1"
 )
 
 // test that each server executes increments and updates its counter.
@@ -90,17 +90,12 @@ func TestLeaderPartition4A(t *testing.T) {
 	ts.checkCounter(r.N, NSRV)
 
 	// partition leader
-	foundl, l := Leader(ts.Config, Gid)
-	if foundl {
-		text := fmt.Sprintf("leader found = %v", l)
-		tester.AnnotateInfo(text, text)
-	} else {
-		text := "did not find a leader"
-		tester.AnnotateInfo(text, text)
-	}
+	l := ts.getLeader()
 	p1, p2 := ts.Group(Gid).MakePartition(l)
 	ts.Group(Gid).Partition(p1, p2)
 	tester.AnnotateTwoPartitions(p1, p2)
+
+	log.Printf("partition leader %d", l)
 
 	text := fmt.Sprintf("concurrently submitting %v Dec to %v", NSUBMIT, l)
 	tester.AnnotateInfo(text, text)
@@ -113,7 +108,8 @@ func TestLeaderPartition4A(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				if err, rep := ts.srvs[l].rsm.Submit(Dec{}); err == rpc.OK {
+				rsm := ts.srvs[l].getRSM()
+				if err, rep := rsm.Submit(Dec{}); err == rpc.OK {
 					t.Fatalf("Submit %d in minority completed %v", i, rep)
 				}
 			}(i)
@@ -151,7 +147,7 @@ func TestLeaderPartition4A(t *testing.T) {
 	}
 
 	// check that all replicas have the same value for counter
-	ts.checkCounter(rep.(*IncRep).N, NSRV)
+	ts.checkCounter(rep.(IncRep).N, NSRV)
 }
 
 // test that restart replays Incs
@@ -177,13 +173,11 @@ func TestRestartReplay4A(t *testing.T) {
 		ts.checkCounter(r.N, NSRV)
 	}
 
-	ts.Group(Gid).Shutdown()
-	tester.AnnotateShutdownAll()
+	ts.kill(ts.g.Servers())
 
 	time.Sleep(1 * time.Second)
 
-	ts.Group(Gid).StartServers()
-	tester.AnnotateRestartAll()
+	ts.restart(ts.g.Servers())
 
 	// submit an Inc
 	r := ts.oneInc()
@@ -232,8 +226,7 @@ func TestShutdown4A(t *testing.T) {
 	// give some time to submit
 	time.Sleep(20 * time.Millisecond)
 
-	ts.Group(Gid).Shutdown()
-	tester.AnnotateShutdownAll()
+	ts.kill(ts.g.Servers())
 
 	select {
 	case <-done:
@@ -268,13 +261,11 @@ func TestRestartSubmit4A(t *testing.T) {
 		ts.checkCounter(r.N, NSRV)
 	}
 
-	ts.Group(Gid).Shutdown()
-	tester.AnnotateShutdownAll()
+	ts.kill(ts.g.Servers())
 
 	time.Sleep(1 * time.Second)
 
-	ts.Group(Gid).StartServers()
-	tester.AnnotateRestartAll()
+	ts.restart(ts.g.Servers())
 
 	// submit an Inc
 	r := ts.oneInc()
@@ -307,8 +298,7 @@ func TestRestartSubmit4A(t *testing.T) {
 	// give some time to submit
 	time.Sleep(20 * time.Millisecond)
 
-	ts.Group(Gid).Shutdown()
-	tester.AnnotateShutdownAll()
+	ts.kill(ts.g.Servers())
 
 	select {
 	case <-done:
@@ -318,8 +308,7 @@ func TestRestartSubmit4A(t *testing.T) {
 		ts.Fatalf(err)
 	}
 
-	ts.Group(Gid).StartServers()
-	tester.AnnotateRestartAll()
+	ts.restart(ts.g.Servers())
 
 	r = ts.oneInc()
 	ts.checkCounter(r.N, NSRV)
@@ -343,7 +332,7 @@ func TestSnapshot4C(t *testing.T) {
 	}
 	ts.checkCounter(N, NSRV)
 
-	sz := ts.Group(Gid).LogSize()
+	sz := ts.Group(Gid).RaftSize()
 	if sz > 2*MAXRAFTSTATE {
 		err := fmt.Sprintf("logs were not trimmed (%v > 2 * %v)", sz, ts.maxraftstate)
 		tester.AnnotateCheckerFailure(err, err)
@@ -353,10 +342,8 @@ func TestSnapshot4C(t *testing.T) {
 	// rsm must have made snapshots by now; shutdown all servers and
 	// restart them from a snapshot
 
-	ts.g.Shutdown()
-	tester.AnnotateShutdownAll()
-	ts.g.StartServers()
-	tester.AnnotateRestartAll()
+	ts.kill(ts.g.Servers())
+	ts.restart(ts.g.Servers())
 
 	// make restarted servers do one increment
 	ts.oneInc()

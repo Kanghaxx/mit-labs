@@ -1,7 +1,7 @@
 package tester
 
 import (
-	//"log"
+	"log"
 	"sync"
 
 	"6.5840/labrpc"
@@ -66,7 +66,7 @@ func (clnt *Clnt) makeEnd(server string) end {
 func (clnt *Clnt) Call(server, method string, args interface{}, reply interface{}) bool {
 	end := clnt.makeEnd(server)
 	ok := end.end.Call(method, args, reply)
-	// log.Printf("%p: Call done e %v m %v %v %v ok %v", clnt, end.name, method, args, reply, ok)
+	//log.Printf("%p: Call done e %v m %v %v %v ok %v", clnt, end.name, method, args, reply, ok)
 	return ok
 }
 
@@ -85,7 +85,7 @@ func (clnt *Clnt) ConnectTo(srvs []string) {
 	clnt.mu.Lock()
 	defer clnt.mu.Unlock()
 
-	// log.Printf("%p: ConnectTo: enable %v", clnt, srvs)
+	log.Printf("%p: ConnectTo: enable %v", clnt, srvs)
 	clnt.srvs = srvs
 	for srv, e := range clnt.ends {
 		if clnt.allowedL(srv) {
@@ -145,12 +145,12 @@ func (clnts *Clnts) makeEnd(servername string) *labrpc.ClientEnd {
 	return end
 }
 
-// Create a clnt for a clerk with specific server names, but allow
-// only connections to connections to servers in to[].
 func (clnts *Clnts) MakeClient() *Clnt {
 	return clnts.MakeClientTo(nil)
 }
 
+// Create a clnt for a clerk with specific server names, but allow
+// only connections to connections to servers in to[].
 func (clnts *Clnts) MakeClientTo(srvs []string) *Clnt {
 	clnts.mu.Lock()
 	defer clnts.mu.Unlock()

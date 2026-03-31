@@ -21,8 +21,10 @@ type KeyValue struct {
 }
 
 // main/mrworker.go calls this function.
-func Worker(mapf func(string, string) []KeyValue,
+func Worker(sockname string, mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
+
+	coordSockName = sockname
 
 	for {
 		var id, taskType, ok = GetTask()
@@ -299,23 +301,22 @@ func CompleteReduceTask(id int) bool {
 	}
 }
 
+var coordSockName string // socket for coordinator
+
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
-	sockname := coordinatorSock()
-	c, err := rpc.DialHTTP("unix", sockname)
+	c, err := rpc.DialHTTP("unix", coordSockName)
 	if err != nil {
 		log.Fatal("dialing:", err)
 	}
 	defer c.Close()
 
-	err = c.Call(rpcname, args, reply)
-	if err == nil {
+	if err := c.Call(rpcname, args, reply); err == nil {
 		return true
 	}
-
-	fmt.Println(err)
+	log.Printf("%d: call failed err %v", os.Getpid(), err)
 	return false
 }

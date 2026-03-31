@@ -1,13 +1,15 @@
 package raft
 
-// The file raftapi/raft.go defines the interface that raft must
+// The file ../raftapi/raftapi.go defines the interface that raft must
 // expose to servers (or the tester), but see comments below for each
 // of these functions for more details.
 //
-// Make() creates a new raft peer that implements the raft interface.
+// In addition,  Make() creates a new raft peer that implements the
+// raft interface.
 
 import (
 	//	"bytes"
+
 	"bytes"
 	"encoding/gob"
 	"fmt"
@@ -20,6 +22,7 @@ import (
 	"time"
 
 	//	"6.5840/labgob"
+
 	"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/raftapi"
@@ -1185,8 +1188,7 @@ type InstallSnapshotReply struct {
 // server isn't the leader, returns false. otherwise start the
 // agreement and return immediately. there is no guarantee that this
 // command will ever be committed to the Raft log, since the leader
-// may fail or lose an election. even if the Raft instance has been killed,
-// this function should return gracefully.
+// may fail or lose an election.
 //
 // the first return value is the index that the command will appear at
 // if it's ever committed. the second return value is the current
@@ -1348,11 +1350,11 @@ func (rf *Raft) persist() {
 
 	// Your code here (3C).
 	// Example:
-	// buffer := new(bytes.Buffer)
-	// e := labgob.NewEncoder(buffer)
+	// w := new(bytes.Buffer)
+	// e := labgob.NewEncoder(w)
 	// e.Encode(rf.xxx)
 	// e.Encode(rf.yyy)
-	// raftstate := buffer.Bytes()
+	// raftstate := w.Bytes()
 	// rf.persister.Save(raftstate, nil)
 
 	stateBuffer := new(bytes.Buffer)
@@ -1398,7 +1400,7 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-
+	// Your code here (3C).
 	// Example:
 	// r := bytes.NewBuffer(data)
 	// d := labgob.NewDecoder(r)
@@ -1454,13 +1456,13 @@ func (rf *Raft) PersistBytes() int {
 // up CPU time, perhaps causing later tests to fail and generating
 // confusing debug output. any goroutine with a long-running loop
 // should call killed() to check whether it should stop.
-func (rf *Raft) Kill() {
-	atomic.StoreInt32(&rf.dead, 1)
-	// Your code here, if desired.
-	//log.Printf("Raft isntance%d: someone called Kill", rf.me)
-	<-rf.applyCompletedCh // wait for apply-loop to exit so it wouldn't send to a closed channel
-	close(rf.applyCh)
-}
+// func (rf *Raft) Kill() {
+// 	atomic.StoreInt32(&rf.dead, 1)
+// 	// Your code here, if desired.
+// 	//log.Printf("Raft isntance%d: someone called Kill", rf.me)
+// 	<-rf.applyCompletedCh // wait for apply-loop to exit so it wouldn't send to a closed channel
+// 	close(rf.applyCh)
+// }
 
 func (rf *Raft) killed() bool {
 	z := atomic.LoadInt32(&rf.dead)

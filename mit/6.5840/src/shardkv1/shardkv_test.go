@@ -2,6 +2,7 @@ package shardkv
 
 import (
 	//"log"
+	"fmt"
 	"testing"
 	"time"
 
@@ -65,9 +66,9 @@ func TestStaticOneShardGroup5A(t *testing.T) {
 		ts.CheckGet(ck, ka[i], va[i], rpc.Tversion(1)) // check the puts
 	}
 
-	// disconnect raft leader of shardgrp and check that keys are
+	// Shutdown raft leader of shardgrp and check that keys are
 	// still available
-	ts.disconnectClntFromLeader(shardcfg.Gid1)
+	ts.shutdownLeader(ck.(*kvtest.TestClerk), shardcfg.Gid1)
 
 	for i := 0; i < n; i++ {
 		ts.CheckGet(ck, ka[i], va[i], rpc.Tversion(1)) // check the puts
@@ -144,6 +145,7 @@ func TestDeleteBasic5A(t *testing.T) {
 			ts.CheckGet(ck, ka[i], va[i], rpc.Tversion(1))
 		}
 	}
+
 	sz1 := ts.Group(gid1).SnapshotSize()
 	sz2 := ts.Group(gid2).SnapshotSize()
 	if sz1+sz2 > sz+10000 {
@@ -614,7 +616,8 @@ func TestPartitionControllerJoin5C(t *testing.T) {
 	ngid := tester.Tgid(0)
 	go func() {
 		ngid = ts.newGid()
-		ts.Config.MakeGroupStart(ngid, NSRV, ts.StartServerShardGrp)
+		args := []string{fmt.Sprintf("--max-raft-state=%d", ts.maxraftstate)}
+		ts.Config.MakeGroupStart("shardgrp1d", args, ngid, NSRV)
 		ts.Group(ngid).Shutdown()
 		ts.join(sck, ngid, ts.Group(ngid).SrvNames())
 		ch <- rpc.OK

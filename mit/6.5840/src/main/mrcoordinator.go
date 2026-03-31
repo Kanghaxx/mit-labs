@@ -9,25 +9,21 @@ package main
 // Please do not change this file.
 //
 
-import (
-	"fmt"
-	"os"
-	"time"
-
-	"6.5840/mr"
-)
+import "6.5840/mr"
+import "time"
+import "os"
+import "fmt"
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: mrcoordinator inputfiles...\n")
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "Usage: mrcoordinator sockname inputfiles...\n")
 		os.Exit(1)
 	}
-	m := mr.MakeCoordinator(os.Args[1:], 10)
-	for m.Done() == false {
-		//fmt.Println("Coordinator: tick")
-		time.Sleep(time.Second * 5)
-	}
-	fmt.Println("Coordinator: job completed. Exiting")
-	time.Sleep(time.Second)
 
+	m := mr.MakeCoordinator(os.Args[1], os.Args[2:], 10)
+	for m.Done() == false {
+		time.Sleep(time.Second)
+	}
+
+	time.Sleep(time.Second)
 }

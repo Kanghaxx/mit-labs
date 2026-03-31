@@ -9,6 +9,7 @@ package shardkv
 //
 
 import (
+	"6.5840/shardkv1/shardgrp"
 
 	"6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
@@ -19,6 +20,7 @@ import (
 type Clerk struct {
 	clnt *tester.Clnt
 	sck  *shardctrler.ShardCtrler
+	rcks   map[tester.Tgid]*shardgrp.Clerk
 	// You will have to modify this struct.
 }
 
@@ -29,8 +31,14 @@ func MakeClerk(clnt *tester.Clnt, sck *shardctrler.ShardCtrler) kvtest.IKVClerk 
 		clnt: clnt,
 		sck:  sck,
 	}
+	ck.rcks = make(map[tester.Tgid]*shardgrp.Clerk)
 	// You'll have to add code here.
 	return ck
+}
+
+func (ck *Clerk) GetClerk(gid tester.Tgid) (*shardgrp.Clerk, bool) {
+	rck, ok := ck.rcks[gid]
+	return rck, ok
 }
 
 

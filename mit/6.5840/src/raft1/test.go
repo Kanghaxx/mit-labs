@@ -9,9 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"6.5840/labrpc"
 	"6.5840/raftapi"
-	tester "6.5840/tester1"
+	"6.5840/tester1"
 )
 
 type Test struct {
@@ -23,24 +22,56 @@ type Test struct {
 	finished int32
 
 	mu       sync.Mutex
-	srvs     []*rfsrv
+	srvs     []*raftServer
 	maxIndex int
 	snapshot bool
 }
 
+type IraftServer interface {
+	Start(command interface{}) (int, int, bool)
+	GetState() (int, bool)
+}
+
+type raftServer struct {
+	mu       sync.Mutex
+	rfsrv    IraftServer
+	applyErr string      // server's applyErr
+	logs     map[int]any // copy of server's committed entries
+}
+
+func newRaftServer(srv IraftServer) *raftServer {
+	return &raftServer{
+		rfsrv: srv,
+		logs:  map[int]any{},
+	}
+}
+
+func (rs *raftServer) entry(i int) (any, bool) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+
+	v, ok := rs.logs[i]
+	return v, ok
+}
+
 func makeTest(t *testing.T, n int, reliable bool, snapshot bool) *Test {
-
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-
 	ts := &Test{
 		t:        t,
 		n:        n,
-		srvs:     make([]*rfsrv, n),
+		srvs:     make([]*raftServer, n),
 		snapshot: snapshot,
 	}
-	ts.Config = tester.MakeConfig(t, n, reliable, ts.mksrv)
+	args := []string{}
+	if snapshot {
+		args = []string{"--max-raft-state=1"}
+	}
+	ts.Config = tester.MakeConfig(t, n, reliable, "raft1d", args)
 	ts.Config.SetLongDelays(true)
+	ts.Config.AddService(ts) // For RPCs from server to tester
 	ts.g = ts.Group(tester.GRP0)
+	for i := 0; i < n; i++ {
+		ts.mksrv(i, ts.g.DaemonClnt(i))
+	}
 	return ts
 }
 
@@ -48,20 +79,36 @@ func (ts *Test) cleanup() {
 	atomic.StoreInt32(&ts.finished, 1)
 	ts.End()
 	ts.Config.Cleanup()
-	ts.CheckTimeout()
 }
 
-func (ts *Test) mksrv(ends []*labrpc.ClientEnd, grp tester.Tgid, srv int, persister *tester.Persister) []tester.IService {
-	s := newRfsrv(ts, srv, ends, persister, ts.snapshot)
+func (ts *Test) mksrv(srv int, dc *tester.DaemonClnt) {
+	s := newRfproxy(dc)
 	ts.mu.Lock()
-	ts.srvs[srv] = s
+	if ts.srvs[srv] == nil {
+		ts.srvs[srv] = newRaftServer(s)
+	} else {
+		ts.srvs[srv].rfsrv = s
+	}
 	ts.mu.Unlock()
-	return []tester.IService{s, s.raft}
 }
 
-func (ts *Test) restart(i int) {
-	ts.g.StartServer(i) // which will call mksrv to make a new server
-	ts.Group(tester.GRP0).ConnectAll()
+func (ts *Test) kill(srvs []int) {
+	ts.g.Kill(srvs)
+	tester.AnnotateShutdown(srvs)
+	for _, srv := range srvs {
+		ts.mu.Lock()
+		ts.srvs[srv].rfsrv = nil
+		ts.mu.Unlock()
+	}
+}
+
+func (ts *Test) restart(srvs []int) {
+	ts.g.StartSrvs(srvs)
+	tester.AnnotateRestart(srvs)
+	for _, srv := range srvs {
+		ts.mksrv(srv, ts.g.DaemonClnt(srv))
+		ts.Group(tester.GRP0).ConnectOne(srv)
+	}
 }
 
 func (ts *Test) checkOneLeader() int {
@@ -73,7 +120,7 @@ func (ts *Test) checkOneLeader() int {
 		leaders := make(map[int][]int)
 		for i := 0; i < ts.n; i++ {
 			if ts.g.IsConnected(i) {
-				if term, leader := ts.srvs[i].GetState(); leader {
+				if term, leader := ts.srvs[i].rfsrv.GetState(); leader {
 					leaders[term] = append(leaders[term], i)
 				}
 			}
@@ -109,7 +156,7 @@ func (ts *Test) checkTerms() int {
 	term := -1
 	for i := 0; i < ts.n; i++ {
 		if ts.g.IsConnected(i) {
-			xterm, _ := ts.srvs[i].GetState()
+			xterm, _ := ts.srvs[i].rfsrv.GetState()
 			if term == -1 {
 				term = xterm
 			} else if term != xterm {
@@ -125,7 +172,7 @@ func (ts *Test) checkTerms() int {
 	return term
 }
 
-func (ts *Test) checkLogs(i int, m raftapi.ApplyMsg) (string, bool) {
+func (ts *Test) CheckLogs(i int, m raftapi.ApplyMsg) (string, bool) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
@@ -133,19 +180,38 @@ func (ts *Test) checkLogs(i int, m raftapi.ApplyMsg) (string, bool) {
 	v := m.Command
 	me := ts.srvs[i]
 	for j, rs := range ts.srvs {
-		if old, oldok := rs.Logs(m.CommandIndex); oldok && old != v {
-			//log.Printf("%v: log %v; server %v\n", i, me.logs, rs.logs)
+		if old, oldok := rs.entry(m.CommandIndex); oldok && old != v {
+			log.Printf("%v: log %v; server %v\n", i, me.logs, rs.logs)
 			// some server has already committed a different value for this entry!
 			err_msg = fmt.Sprintf("commit index=%v server=%v %v != server=%v %v",
 				m.CommandIndex, i, m.Command, j, old)
 		}
 	}
-	_, prevok := me.logs[m.CommandIndex-1]
+	_, prevok := me.entry(m.CommandIndex - 1)
 	me.logs[m.CommandIndex] = v
 	if m.CommandIndex > ts.maxIndex {
 		ts.maxIndex = m.CommandIndex
 	}
 	return err_msg, prevok
+}
+
+func (ts *Test) IngestLog(i int, xlog map[int]any) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	me := ts.srvs[i]
+	me.logs = map[int]any{}
+	for k, v := range xlog {
+		me.logs[k] = v
+	}
+}
+
+func (ts *Test) ApplyErr(i int, err string) {
+	me := ts.srvs[i]
+	ts.mu.Lock()
+	me.applyErr = err
+	ts.mu.Unlock()
+	tester.AnnotateCheckerFailureBeforeExit("apply error", err)
 }
 
 // check that none of the connected servers
@@ -154,7 +220,7 @@ func (ts *Test) checkNoLeader() {
 	tester.AnnotateCheckerBegin("checking no unexpected leader among connected servers")
 	for i := 0; i < ts.n; i++ {
 		if ts.g.IsConnected(i) {
-			_, is_leader := ts.srvs[i].GetState()
+			_, is_leader := ts.srvs[i].rfsrv.GetState()
 			if is_leader {
 				details := fmt.Sprintf("leader = %v", i)
 				tester.AnnotateCheckerFailure("unexpected leader found", details)
@@ -192,7 +258,7 @@ func (ts *Test) nCommitted(index int) (int, any) {
 			ts.t.Fatal(rs.applyErr)
 		}
 
-		cmd1, ok := rs.Logs(index)
+		cmd1, ok := rs.entry(index)
 
 		if ok {
 			if count > 0 && cmd != cmd1 {
@@ -238,14 +304,14 @@ func (ts *Test) one(cmd any, expectedServers int, retry bool) int {
 		index := -1
 		for range ts.srvs {
 			starts = (starts + 1) % len(ts.srvs)
-			var rf raftapi.Raft
+			var rf IraftServer
 			if ts.g.IsConnected(starts) {
 				ts.srvs[starts].mu.Lock()
-				rf = ts.srvs[starts].raft
+				rf = ts.srvs[starts].rfsrv
 				ts.srvs[starts].mu.Unlock()
 			}
 			if rf != nil {
-				//log.Printf("peer %d Start %v", starts, cmd)
+				// log.Printf("peer %d Start %v rf %v", starts, cmd, rf)
 				index1, _, ok := rf.Start(cmd)
 				if ok {
 					index = index1
@@ -266,6 +332,7 @@ func (ts *Test) one(cmd any, expectedServers int, retry bool) int {
 						// and it was the command we submitted.
 						desp := fmt.Sprintf("agreement of %.8s reached", textcmd)
 						tester.AnnotateCheckerSuccess(desp, "OK")
+						ts.Config.OpInc()
 						return index
 					}
 				}
@@ -308,7 +375,7 @@ func (ts *Test) wait(index int, n int, startTerm int) any {
 		}
 		if startTerm > -1 {
 			for _, rs := range ts.srvs {
-				if t, _ := rs.raft.GetState(); t > startTerm {
+				if t, _ := rs.rfsrv.GetState(); t > startTerm {
 					// someone has moved on
 					// can no longer guarantee that we'll "win"
 					return -1
@@ -326,4 +393,40 @@ func (ts *Test) wait(index int, n int, startTerm int) any {
 			nd, index, n)
 	}
 	return cmd
+}
+
+type CheckLogsArgs struct {
+	Index int
+	Msg   raftapi.ApplyMsg
+}
+
+type CheckLogsReply struct {
+	Err    string
+	Prevok bool
+}
+
+func (ts *Test) CheckLogsRPC(args *CheckLogsArgs, reply *CheckLogsReply) {
+	reply.Err, reply.Prevok = ts.CheckLogs(args.Index, args.Msg)
+}
+
+type IngestLogArgs struct {
+	Index int
+	Log   map[int]any
+}
+
+type IngestLogReply struct{}
+
+func (ts *Test) IngestLogRPC(args *IngestLogArgs, reply *IngestLogReply) {
+	ts.IngestLog(args.Index, args.Log)
+}
+
+type ApplyErrArgs struct {
+	Index int
+	Err   string
+}
+
+type ApplyErrReply struct{}
+
+func (ts *Test) ApplyErrRPC(args *ApplyErrArgs, reply *ApplyErrReply) {
+	ts.ApplyErr(args.Index, args.Err)
 }

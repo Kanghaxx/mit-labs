@@ -8,14 +8,19 @@ import (
 )
 
 type Clerk struct {
-	clnt    *tester.Clnt
+	*tester.Clnt
 	servers []string
-	// You will have to modify this struct.
+	leader int // last successful leader (index into servers[])
+	// You can  add to this struct.
 }
 
 func MakeClerk(clnt *tester.Clnt, servers []string) *Clerk {
-	ck := &Clerk{clnt: clnt, servers: servers}
+	ck := &Clerk{Clnt: clnt, servers: servers}
 	return ck
+}
+
+func (ck *Clerk) Leader() int {
+	return ck.leader
 }
 
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {

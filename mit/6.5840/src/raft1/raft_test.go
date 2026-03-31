@@ -10,15 +10,14 @@ package raft
 
 import (
 	"fmt"
+	//"log"
+	"math/rand"
 	"sync"
 	"sync/atomic"
-
-	// "log"
-	"math/rand"
 	"testing"
 	"time"
 
-	tester "6.5840/tester1"
+	"6.5840/tester1"
 )
 
 // The tester generously allows solutions to complete elections in one second
@@ -201,7 +200,6 @@ func TestFollowerFailure3B(t *testing.T) {
 	// disconnect one follower from the network.
 	leader1 := ts.checkOneLeader()
 	ts.g.DisconnectAll((leader1 + 1) % servers)
-	fmt.Printf("Test (3B): one instance disconnected: %d \n", (leader1+1)%servers)
 	tester.AnnotateConnection(ts.g.GetConnected())
 
 	// the leader and remaining follower should be
@@ -217,7 +215,7 @@ func TestFollowerFailure3B(t *testing.T) {
 	tester.AnnotateConnection(ts.g.GetConnected())
 
 	// submit a command.
-	index, _, ok := ts.srvs[leader2].Raft().Start(104)
+	index, _, ok := ts.srvs[leader2].rfsrv.Start(104)
 	if ok != true {
 		t.Fatalf("leader rejected Start()")
 	}
@@ -229,7 +227,6 @@ func TestFollowerFailure3B(t *testing.T) {
 
 	// check that command 104 did not commit.
 	ts.checkNoAgreement(index)
-
 }
 
 // test just failure of leaders.
@@ -261,7 +258,7 @@ func TestLeaderFailure3B(t *testing.T) {
 
 	// submit a command to each server.
 	for i := 0; i < servers; i++ {
-		ts.srvs[i].Raft().Start(104)
+		ts.srvs[i].rfsrv.Start(104)
 	}
 
 	time.Sleep(2 * RaftElectionTimeout)
@@ -324,7 +321,7 @@ func TestFailNoAgree3B(t *testing.T) {
 	ts.g.DisconnectAll((leader + 3) % servers)
 	tester.AnnotateConnection(ts.g.GetConnected())
 
-	index, _, ok := ts.srvs[leader].Raft().Start(20)
+	index, _, ok := ts.srvs[leader].rfsrv.Start(20)
 	if ok != true {
 		t.Fatalf("leader rejected Start()")
 	}
@@ -348,7 +345,7 @@ func TestFailNoAgree3B(t *testing.T) {
 	// the disconnected majority may have chosen a leader from
 	// among their own ranks, forgetting index 2.
 	leader2 := ts.checkOneLeader()
-	index2, _, ok2 := ts.srvs[leader2].Raft().Start(30)
+	index2, _, ok2 := ts.srvs[leader2].rfsrv.Start(30)
 	if ok2 == false {
 		t.Fatalf("leader2 rejected Start()")
 	}
@@ -378,7 +375,7 @@ loop:
 		leader := ts.checkOneLeader()
 		textb := fmt.Sprintf("checking concurrent submission of commands (attempt %v)", try)
 		tester.AnnotateCheckerBegin(textb)
-		_, term, ok := ts.srvs[leader].Raft().Start(1)
+		_, term, ok := ts.srvs[leader].rfsrv.Start(1)
 
 		despretry := "concurrent submission failed; retry"
 		if !ok {
@@ -395,7 +392,7 @@ loop:
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				i, term1, ok := ts.srvs[leader].Raft().Start(100 + i)
+				i, term1, ok := ts.srvs[leader].rfsrv.Start(100 + i)
 				if term1 != term {
 					return
 				}
@@ -410,7 +407,7 @@ loop:
 		close(is)
 
 		for j := 0; j < servers; j++ {
-			if t, _ := ts.srvs[j].Raft().GetState(); t != term {
+			if t, _ := ts.srvs[j].rfsrv.GetState(); t != term {
 				// term changed -- can't expect low RPC counts
 				details := fmt.Sprintf("term of server %v changed from %v to %v",
 					j, term, t)
@@ -499,9 +496,9 @@ func TestRejoin3B(t *testing.T) {
 
 	// make old leader try to agree on some entries
 	start := tester.GetAnnotateTimestamp()
-	ts.srvs[leader1].Raft().Start(102)
-	ts.srvs[leader1].Raft().Start(103)
-	ts.srvs[leader1].Raft().Start(104)
+	ts.srvs[leader1].rfsrv.Start(102)
+	ts.srvs[leader1].rfsrv.Start(103)
+	ts.srvs[leader1].rfsrv.Start(104)
 	text := fmt.Sprintf("submitted commands [102 103 104] to %v", leader1)
 	tester.AnnotateInfoInterval(start, text, text)
 
@@ -545,7 +542,7 @@ func TestBackup3B(t *testing.T) {
 	// submit lots of commands that won't commit
 	start := tester.GetAnnotateTimestamp()
 	for i := 0; i < 50; i++ {
-		ts.srvs[leader1].Raft().Start(rand.Int())
+		ts.srvs[leader1].rfsrv.Start(rand.Int())
 	}
 	text := fmt.Sprintf("submitted 50 commands to %v", leader1)
 	tester.AnnotateInfoInterval(start, text, text)
@@ -578,7 +575,7 @@ func TestBackup3B(t *testing.T) {
 	// lots more commands that won't commit
 	start = tester.GetAnnotateTimestamp()
 	for i := 0; i < 50; i++ {
-		ts.srvs[leader2].Raft().Start(rand.Int())
+		ts.srvs[leader2].rfsrv.Start(rand.Int())
 	}
 	text = fmt.Sprintf("submitted 50 commands to %v", leader2)
 	tester.AnnotateInfoInterval(start, text, text)
@@ -647,7 +644,7 @@ loop:
 		total1 = rpcs()
 
 		iters := 10
-		starti, term, ok := ts.srvs[leader].Raft().Start(1)
+		starti, term, ok := ts.srvs[leader].rfsrv.Start(1)
 		despretry := "submission failed; retry"
 		if !ok {
 			// leader moved on really quickly
@@ -660,7 +657,7 @@ loop:
 		for i := 1; i < iters+2; i++ {
 			x := int(rand.Int31())
 			cmds = append(cmds, x)
-			index1, term1, ok := ts.srvs[leader].Raft().Start(x)
+			index1, term1, ok := ts.srvs[leader].rfsrv.Start(x)
 			if term1 != term {
 				// Term changed while starting
 				details := fmt.Sprintf("term of the leader (%v) changed from %v to %v",
@@ -706,7 +703,7 @@ loop:
 		failed := false
 		total2 = 0
 		for j := 0; j < servers; j++ {
-			if t, _ := ts.srvs[j].Raft().GetState(); t != term {
+			if t, _ := ts.srvs[j].rfsrv.GetState(); t != term {
 				// term changed -- can't expect low RPC counts
 				// need to keep going to update total2
 				details := fmt.Sprintf("term of server %v changed from %v to %v", j, term, t)
@@ -773,42 +770,34 @@ func TestPersist13C(t *testing.T) {
 
 	ts.one(11, servers, true)
 
-	ts.g.Shutdown()
-	tester.AnnotateShutdownAll()
-	ts.g.StartServers()
-	tester.AnnotateRestartAll()
+	ts.kill(ts.g.Servers())
+	ts.restart(ts.g.Servers())
 
 	ts.one(12, servers, true)
 
 	leader1 := ts.checkOneLeader()
-	ts.g.ShutdownServer(leader1)
-	tester.AnnotateShutdown([]int{leader1})
-	ts.restart(leader1)
-	tester.AnnotateRestart([]int{leader1})
+	ts.kill([]int{leader1})
+	ts.restart([]int{leader1})
 
 	ts.one(13, servers, true)
 
 	leader2 := ts.checkOneLeader()
-	ts.g.ShutdownServer(leader2)
-	tester.AnnotateShutdown([]int{leader2})
+	ts.kill([]int{leader2})
 
 	ts.one(14, servers-1, true)
 
-	ts.restart(leader2)
-	tester.AnnotateRestart([]int{leader2})
+	ts.restart([]int{leader2})
 
 	tester.AnnotateCheckerBegin("wait for all servers to commit until index 4")
 	ts.wait(4, servers, -1) // wait for leader2 to join before killing i3
 	tester.AnnotateCheckerSuccess("all committed until index 4", "OK")
 
 	i3 := (ts.checkOneLeader() + 1) % servers
-	ts.g.ShutdownServer(i3)
-	tester.AnnotateShutdown([]int{i3})
+	ts.kill([]int{i3})
 
 	ts.one(15, servers-1, true)
 
-	ts.restart(i3)
-	tester.AnnotateRestart([]int{i3})
+	ts.restart([]int{i3})
 
 	ts.one(16, servers, true)
 }
@@ -828,35 +817,26 @@ func TestPersist23C(t *testing.T) {
 
 		leader1 := ts.checkOneLeader()
 
-		ts.g.ShutdownServer((leader1 + 1) % servers)
-		ts.g.ShutdownServer((leader1 + 2) % servers)
-		tester.AnnotateShutdown([]int{(leader1 + 1) % servers, (leader1 + 2) % servers})
+		ts.kill([]int{(leader1 + 1) % servers, (leader1 + 2) % servers})
 
 		ts.one(10+index, servers-2, true)
 		index++
 
-		ts.g.ShutdownServer((leader1 + 0) % servers)
-		ts.g.ShutdownServer((leader1 + 3) % servers)
-		ts.g.ShutdownServer((leader1 + 4) % servers)
-		tester.AnnotateShutdown([]int{
+		ts.kill([]int{
 			(leader1 + 0) % servers, (leader1 + 3) % servers, (leader1 + 4) % servers,
 		})
 
-		ts.restart((leader1 + 1) % servers)
-		ts.restart((leader1 + 2) % servers)
-		tester.AnnotateRestart([]int{(leader1 + 1) % servers, (leader1 + 2) % servers})
+		ts.restart([]int{(leader1 + 1) % servers, (leader1 + 2) % servers})
 
 		time.Sleep(RaftElectionTimeout)
 
-		ts.restart((leader1 + 3) % servers)
-		tester.AnnotateRestart([]int{(leader1 + 3) % servers})
+		ts.restart([]int{(leader1 + 3) % servers})
 
 		ts.one(10+index, servers-2, true)
 		index++
 
-		ts.restart((leader1 + 4) % servers)
-		ts.restart((leader1 + 0) % servers)
-		tester.AnnotateRestart([]int{(leader1 + 4) % servers, (leader1 + 0) % servers})
+		ts.restart([]int{(leader1 + 4) % servers})
+		ts.restart([]int{(leader1 + 0) % servers})
 	}
 
 	ts.one(1000, servers, true)
@@ -878,18 +858,14 @@ func TestPersist33C(t *testing.T) {
 
 	ts.one(102, 2, true)
 
-	ts.g.ShutdownServer((leader + 0) % servers)
-	ts.g.ShutdownServer((leader + 1) % servers)
-	tester.AnnotateShutdown([]int{(leader + 0) % servers, (leader + 1) % servers})
+	ts.kill([]int{(leader + 0) % servers, (leader + 1) % servers})
 	ts.g.ConnectOne((leader + 2) % servers)
-	ts.restart((leader + 0) % servers)
-	tester.AnnotateRestart([]int{(leader + 0) % servers})
+	ts.restart([]int{(leader + 0) % servers})
 	tester.AnnotateConnection(ts.g.GetConnected())
 
 	ts.one(103, 2, true)
 
-	ts.restart((leader + 1) % servers)
-	tester.AnnotateRestart([]int{(leader + 1) % servers})
+	ts.restart([]int{(leader + 1) % servers})
 
 	ts.one(104, servers, true)
 }
@@ -916,7 +892,7 @@ func TestFigure83C(t *testing.T) {
 	for iters := 0; iters < 1000; iters++ {
 		leader := -1
 		for i := 0; i < servers; i++ {
-			rf := ts.srvs[i].Raft()
+			rf := ts.srvs[i].rfsrv
 			if rf != nil {
 				cmd := rand.Int()
 				_, _, ok := rf.Start(cmd)
@@ -937,27 +913,24 @@ func TestFigure83C(t *testing.T) {
 		}
 
 		if leader != -1 {
-			ts.g.ShutdownServer(leader)
-			tester.AnnotateShutdown([]int{leader})
+			ts.kill([]int{leader})
 			nup -= 1
 		}
 
 		if nup < 3 {
 			s := rand.Int() % servers
-			if ts.srvs[s].Raft() == nil {
-				ts.restart(s)
-				tester.AnnotateRestart([]int{s})
+			if ts.srvs[s].rfsrv == nil {
+				ts.restart([]int{s})
 				nup += 1
 			}
 		}
 	}
 
 	for i := 0; i < servers; i++ {
-		if ts.srvs[i].Raft() == nil {
-			ts.restart(i)
+		if ts.srvs[i].rfsrv == nil {
+			ts.restart([]int{i})
 		}
 	}
-	tester.AnnotateRestartAll()
 
 	ts.one(rand.Int(), servers, true)
 }
@@ -1009,7 +982,7 @@ func TestFigure8Unreliable3C(t *testing.T) {
 		leader := -1
 		for i := 0; i < servers; i++ {
 			cmd := rand.Int() % 10000
-			_, _, ok := ts.srvs[i].Raft().Start(cmd)
+			_, _, ok := ts.srvs[i].rfsrv.Start(cmd)
 			if ok {
 				text := fmt.Sprintf("submitted command %v to server %v", cmd, i)
 				tester.AnnotateInfo(text, text)
@@ -1082,7 +1055,7 @@ func internalChurn(t *testing.T, reliable bool) {
 			for i := 0; i < servers; i++ {
 				// try them all, maybe one of them is a leader
 				ts.mu.Lock()
-				rf := ts.srvs[i].Raft()
+				rf := ts.srvs[i].rfsrv
 				ts.mu.Unlock()
 				if rf != nil {
 					index1, _, ok1 := rf.Start(x)
@@ -1133,9 +1106,8 @@ func internalChurn(t *testing.T, reliable bool) {
 
 		if (rand.Int() % 1000) < 500 {
 			i := rand.Int() % servers
-			if ts.srvs[i].raft == nil {
-				ts.restart(i)
-				tester.AnnotateRestart([]int{i})
+			if ts.srvs[i].rfsrv == nil {
+				ts.restart([]int{i})
 			}
 			ts.g.ConnectOne(i)
 			tester.AnnotateConnection(ts.g.GetConnected())
@@ -1143,9 +1115,8 @@ func internalChurn(t *testing.T, reliable bool) {
 
 		if (rand.Int() % 1000) < 200 {
 			i := rand.Int() % servers
-			if ts.srvs[i].raft != nil {
-				ts.g.ShutdownServer(i)
-				tester.AnnotateShutdown([]int{i})
+			if ts.srvs[i].rfsrv != nil {
+				ts.kill([]int{i})
 			}
 		}
 
@@ -1159,12 +1130,11 @@ func internalChurn(t *testing.T, reliable bool) {
 	time.Sleep(RaftElectionTimeout)
 	ts.SetReliable(true)
 	for i := 0; i < servers; i++ {
-		if ts.srvs[i].raft == nil {
-			ts.restart(i)
+		if ts.srvs[i].rfsrv == nil {
+			ts.restart([]int{i})
 		}
 		ts.g.ConnectOne(i)
 	}
-	tester.AnnotateRestartAll()
 	tester.AnnotateConnection(ts.g.GetConnected())
 
 	atomic.StoreInt32(&stop, 1)
@@ -1253,8 +1223,7 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			ts.one(rand.Int(), servers-1, true)
 		}
 		if crash {
-			ts.g.ShutdownServer(victim)
-			tester.AnnotateShutdown([]int{victim})
+			ts.kill([]int{victim})
 			ts.one(rand.Int(), servers-1, true)
 		}
 
@@ -1262,7 +1231,7 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 		start := tester.GetAnnotateTimestamp()
 		nn := (SnapShotInterval / 2) + (rand.Int() % SnapShotInterval)
 		for i := 0; i < nn; i++ {
-			ts.srvs[sender].Raft().Start(rand.Int())
+			ts.srvs[sender].rfsrv.Start(rand.Int())
 		}
 		text := fmt.Sprintf("submitting %v commands to %v", nn, sender)
 		tester.AnnotateInfoInterval(start, text, text)
@@ -1277,8 +1246,8 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			ts.one(rand.Int(), servers-1, true)
 		}
 
-		if ts.g.LogSize() >= MAXLOGSIZE {
-			ts.t.Fatalf("Log size too large")
+		if ts.g.RaftSize() >= MAXLOGSIZE {
+			ts.t.Fatalf("Raft size too large")
 		}
 		if disconnect {
 			// reconnect a follower, who maybe behind and
@@ -1289,8 +1258,7 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			leader1 = ts.checkOneLeader()
 		}
 		if crash {
-			ts.restart(victim)
-			tester.AnnotateRestart([]int{victim})
+			ts.restart([]int{victim})
 			ts.one(rand.Int(), servers, true)
 			leader1 = ts.checkOneLeader()
 		}
@@ -1342,10 +1310,8 @@ func TestSnapshotAllCrash3D(t *testing.T) {
 		index1 := ts.one(rand.Int(), servers, true)
 
 		// crash all
-		ts.g.Shutdown()
-		tester.AnnotateShutdownAll()
-		ts.g.StartServers()
-		tester.AnnotateRestartAll()
+		ts.kill(ts.g.Servers())
+		ts.restart(ts.g.Servers())
 
 		index2 := ts.one(rand.Int(), servers, true)
 		if index2 < index1+1 {
@@ -1373,18 +1339,14 @@ func TestSnapshotInit3D(t *testing.T) {
 		ts.one(rand.Int(), servers, true)
 	}
 
-	ts.g.Shutdown()
-	tester.AnnotateShutdownAll()
-	ts.g.StartServers()
-	tester.AnnotateRestartAll()
+	ts.kill(ts.g.Servers())
+	ts.restart(ts.g.Servers())
 
 	// a single op, to get something to be written back to persistent storage.
 	ts.one(rand.Int(), servers, true)
 
-	ts.g.Shutdown()
-	tester.AnnotateShutdownAll()
-	ts.g.StartServers()
-	tester.AnnotateRestartAll()
+	ts.kill(ts.g.Servers())
+	ts.restart(ts.g.Servers())
 
 	// do another op to trigger potential bug
 	ts.one(rand.Int(), servers, true)

@@ -66,11 +66,10 @@ const (
 )
 
 type reqMsg struct {
-	endname  interface{} // name of sending ClientEnd
-	svcMeth  string      // e.g. "Raft.AppendEntries"
-	argsType reflect.Type
-	args     []byte
-	replyCh  chan replyMsg
+	endname interface{} // name of sending ClientEnd
+	svcMeth string      // e.g. "Raft.AppendEntries"
+	args    []byte
+	replyCh chan replyMsg
 }
 
 type replyMsg struct {
@@ -78,28 +77,55 @@ type replyMsg struct {
 	reply []byte
 }
 
+func Marshall(args interface{}) []byte {
+	qb := new(bytes.Buffer)
+	qe := labgob.NewEncoder(qb)
+	if err := qe.Encode(args); err != nil {
+		log.Fatalf("Marshall fatal: encode arg err %v", err)
+	}
+	return qb.Bytes()
+}
+
+func Unmarshall(b []byte, repl interface{}) {
+	rb := bytes.NewBuffer(b)
+	rd := labgob.NewDecoder(rb)
+	if err := rd.Decode(repl); err != nil {
+		log.Fatalf("Unmarshall fatal: decode reply err %v", err)
+	}
+}
+
+type Fcall func(string, string, []byte) ([]byte, bool)
+
 type ClientEnd struct {
 	endname interface{}   // this end-point's name
 	ch      chan reqMsg   // copy of Network.endCh
 	done    chan struct{} // closed when Network is cleaned up
+	callf   Fcall
+}
+
+func (e *ClientEnd) SetCall(f Fcall) {
+	e.callf = f
 }
 
 // send an RPC, wait for the reply.
 // the return value indicates success; false means that
 // no reply was received from the server.
 func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bool {
+	if e.callf != nil {
+		rep, ok := e.callf(e.endname.(string), svcMeth, Marshall(args))
+		if !ok {
+			return false
+		}
+		Unmarshall(rep, reply)
+		return true
+	}
 	req := reqMsg{}
 	req.endname = e.endname
 	req.svcMeth = svcMeth
-	req.argsType = reflect.TypeOf(args)
 	req.replyCh = make(chan replyMsg)
+	req.args = Marshall(args)
 
-	qb := new(bytes.Buffer)
-	qe := labgob.NewEncoder(qb)
-	if err := qe.Encode(args); err != nil {
-		panic(err)
-	}
-	req.args = qb.Bytes()
+	//log.Printf("Call %v", req)
 
 	//
 	// send the request.
@@ -117,15 +143,41 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 	//
 	rep := <-req.replyCh
 	if rep.ok {
-		rb := bytes.NewBuffer(rep.reply)
-		rd := labgob.NewDecoder(rb)
-		if err := rd.Decode(reply); err != nil {
-			log.Fatalf("ClientEnd.Call(): decode reply: %v\n", err)
-		}
+		Unmarshall(rep.reply, reply)
 		return true
 	} else {
 		return false
 	}
+}
+
+// forward an RPC from a server daemon to another server daemon, wait
+// for the reply.  the return value indicates success; false means
+// that no reply was received from the server.
+func (e *ClientEnd) Forward(svcMeth string, args []byte) ([]byte, bool) {
+	req := reqMsg{}
+	req.endname = e.endname
+	req.svcMeth = svcMeth
+	req.replyCh = make(chan replyMsg)
+	req.args = args
+
+	//log.Printf("forward %v", req)
+
+	//
+	// send the request.
+	//
+	select {
+	case e.ch <- req:
+		// the request has been sent.
+	case <-e.done:
+		// entire Network has been destroyed.
+		return nil, false
+	}
+
+	//
+	// wait for the reply.
+	//
+	rep := <-req.replyCh
+	return rep.reply, rep.ok
 }
 
 type Network struct {
@@ -238,6 +290,8 @@ func (rn *Network) isServerDead(endname interface{}, servername interface{}, ser
 func (rn *Network) processReq(req reqMsg) {
 	enabled, servername, server, reliable, longreordering := rn.readEndnameInfo(req.endname)
 
+	//log.Printf("processReq %v %v name %v %v", req.endname, enabled, servername, server)
+
 	if enabled && servername != nil && server != nil {
 		if reliable == false {
 			// short delay
@@ -257,7 +311,7 @@ func (rn *Network) processReq(req reqMsg) {
 		// failure reply.
 		ech := make(chan replyMsg)
 		go func() {
-			r := server.dispatch(req)
+			r := server.dispatch(servername, req)
 			ech <- r
 		}()
 
@@ -349,6 +403,18 @@ func (rn *Network) MakeEnd(endname interface{}) *ClientEnd {
 	return e
 }
 
+func (rn *Network) LookupEnd(endname interface{}) *ClientEnd {
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+
+	if end, ok := rn.ends[endname]; !ok {
+		log.Fatalf("MakeEnd: %v doesn't exists\n", endname)
+		return nil
+	} else {
+		return end
+	}
+}
+
 func (rn *Network) DeleteEnd(endname interface{}) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
@@ -411,13 +477,16 @@ func (rn *Network) GetTotalBytes() int64 {
 	return x
 }
 
+type Fdispatch func(string, []byte) ([]byte, bool)
+
 // a server is a collection of services, all sharing
 // the same rpc dispatcher. so that e.g. both a Raft
 // and a k/v server can listen to the same rpc endpoint.
 type Server struct {
-	mu       sync.Mutex
-	services map[string]*Service
-	count    int // incoming RPCs
+	mu        sync.Mutex
+	services  map[string]*Service
+	count     int // incoming RPCs
+	dispatchf Fdispatch
 }
 
 func MakeServer() *Server {
@@ -426,13 +495,22 @@ func MakeServer() *Server {
 	return rs
 }
 
+func (rs *Server) SetDispatch(f Fdispatch) {
+	rs.dispatchf = f
+}
 func (rs *Server) AddService(svc *Service) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	rs.services[svc.name] = svc
 }
 
-func (rs *Server) dispatch(req reqMsg) replyMsg {
+func (rs *Server) Dispatch(srv, svcMeth, clnt string, args []byte) ([]byte, bool) {
+	req := reqMsg{endname: clnt, svcMeth: svcMeth, args: args}
+	rep := rs.dispatch(srv, req)
+	return rep.reply, rep.ok
+}
+
+func (rs *Server) dispatch(servername interface{}, req reqMsg) replyMsg {
 	rs.mu.Lock()
 
 	rs.count += 1
@@ -443,8 +521,12 @@ func (rs *Server) dispatch(req reqMsg) replyMsg {
 	methodName := req.svcMeth[dot+1:]
 
 	service, ok := rs.services[serviceName]
-
 	rs.mu.Unlock()
+
+	if rs.dispatchf != nil {
+		rep, ok := rs.dispatchf(req.svcMeth, req.args)
+		return replyMsg{ok, rep}
+	}
 
 	if ok {
 		return service.dispatch(methodName, req)
@@ -486,9 +568,6 @@ func MakeService(rcvr interface{}) *Service {
 		mtype := method.Type
 		mname := method.Name
 
-		//fmt.Printf("%v pp %v ni %v 1k %v 2k %v no %v\n",
-		//	mname, method.PkgPath, mtype.NumIn(), mtype.In(1).Kind(), mtype.In(2).Kind(), mtype.NumOut())
-
 		if method.PkgPath != "" || // capitalized?
 			mtype.NumIn() != 3 ||
 			//mtype.In(1).Kind() != reflect.Ptr ||
@@ -509,12 +588,10 @@ func (svc *Service) dispatch(methname string, req reqMsg) replyMsg {
 	if method, ok := svc.methods[methname]; ok {
 		// prepare space into which to read the argument.
 		// the Value's type will be a pointer to req.argsType.
-		args := reflect.New(req.argsType)
+		args := reflect.New(method.Type.In(1))
 
 		// decode the argument.
-		ab := bytes.NewBuffer(req.args)
-		ad := labgob.NewDecoder(ab)
-		ad.Decode(args.Interface())
+		Unmarshall(req.args, args.Interface())
 
 		// allocate space for the reply.
 		replyType := method.Type.In(2)

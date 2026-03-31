@@ -30,11 +30,14 @@ func MakeClerk(clnt *tester.Clnt, server string) kvtest.IKVClerk {
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
-	reply := &rpc.GetReply{}
-	for !ck.clnt.Call(ck.server, "KVServer.Get", &rpc.GetArgs{Key: key}, reply) {
-		time.Sleep(100 * time.Millisecond)
+	args := rpc.GetArgs{Key: key}
+	for {
+		reply := rpc.GetReply{}
+		if ck.clnt.Call(ck.server, "KVServer.Get", &args, &reply) {
+			return reply.Value, reply.Version, reply.Err
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	return reply.Value, reply.Version, reply.Err
 }
 
 // Put updates key with value only if the version in the
@@ -55,14 +58,17 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
-	reply := &rpc.PutReply{}
+	args := rpc.PutArgs{Key: key, Value: value, Version: version}
 	attempt := 1
-	for !ck.clnt.Call(ck.server, "KVServer.Put", &rpc.PutArgs{Key: key, Value: value, Version: version}, reply) {
+	for {
+		reply := rpc.PutReply{}
+		if ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply) {
+			if (attempt > 1) && (reply.Err == rpc.ErrVersion) {
+				return rpc.ErrMaybe
+			}
+			return reply.Err
+		}
 		attempt++
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
-	if attempt > 1 && reply.Err == rpc.ErrVersion {
-		return rpc.ErrMaybe
-	}
-	return reply.Err
 }

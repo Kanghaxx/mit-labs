@@ -32,9 +32,13 @@ type Config struct {
 	t0    time.Time // time at which test_test.go called cfg.begin()
 	rpcs0 int       // rpcTotal() at start of test
 	ops   int32     // number of clerk get/put/append method calls
+
+	endName string // name of tester
+
+	trpc *TesterRPC
 }
 
-func MakeConfig(t *testing.T, n int, reliable bool, mks FstartServer) *Config {
+func MakeConfig(t *testing.T, n int, reliable bool, prog string, args []string) *Config {
 	ncpu_once.Do(func() {
 		if runtime.NumCPU() < 2 {
 			fmt.Printf("warning: only one CPU, which may conceal locking bugs\n")
@@ -45,13 +49,13 @@ func MakeConfig(t *testing.T, n int, reliable bool, mks FstartServer) *Config {
 	cfg := &Config{}
 	cfg.t = t
 	cfg.net = labrpc.MakeNetwork()
-	cfg.Groups = newGroups(cfg.net)
-	cfg.MakeGroupStart(GRP0, n, mks)
+	cfg.endName = Randstring(20)
+	cfg.trpc = newTesterRPCSrv(cfg)
+	cfg.Groups = newGroups(cfg.net, prog, args, cfg.endName)
+	cfg.MakeGroupStart(prog, args, GRP0, n)
 	cfg.Clnts = makeClnts(cfg.net)
 	cfg.start = time.Now()
-
 	cfg.net.Reliable(reliable)
-
 	return cfg
 }
 
@@ -75,20 +79,28 @@ func (cfg *Config) Group(gid Tgid) *ServerGrp {
 	return cfg.lookupGroup(gid)
 }
 
+func (cfg *Config) AddService(svc any) {
+	if cfg.trpc != nil {
+		cfg.trpc.AddService(svc)
+	}
+}
+
 func (cfg *Config) Cleanup() {
 	cfg.Clnts.cleanup()
 	cfg.Groups.cleanup()
 	cfg.net.Cleanup()
+	if cfg.trpc != nil {
+		cfg.trpc.cleanup()
+	}
 	if cfg.t.Failed() {
 		annotation.cleanup(true, "test failed")
 	} else {
 		annotation.cleanup(false, "test passed")
 	}
-	cfg.CheckTimeout()
 }
 
-func (cfg *Config) MakeGroupStart(gid Tgid, nsrv int, mks FstartServer) {
-	cfg.MakeGroup(gid, nsrv, mks)
+func (cfg *Config) MakeGroupStart(prog string, args []string, gid Tgid, nsrv int) {
+	cfg.MakeGroup(prog, args, gid, nsrv)
 	cfg.Group(gid).StartServers()
 }
 
@@ -121,14 +133,12 @@ func (cfg *Config) Begin(description string) {
 	atomic.StoreInt32(&cfg.ops, 0)
 }
 
-func (cfg *Config) Op() {
+func (cfg *Config) OpInc() {
 	atomic.AddInt32(&cfg.ops, 1)
 }
 
-// end a Test -- the fact that we got here means there
-// was no failure.
-// print the Passed message,
-// and some performance numbers.
+// end a Test
+// print the Passed message and some performance numbers, if test didn't fail
 func (cfg *Config) End() {
 	cfg.CheckTimeout()
 	if cfg.t.Failed() == false {
@@ -166,18 +176,18 @@ func (cfg *Config) Fatalf(format string, args ...any) {
 	cfg.t.FailNow()
 }
 
+// enforce a two minute real-time limit on each test
+func (cfg *Config) CheckTimeout() {
+	if !cfg.t.Failed() && time.Since(cfg.start) > 120*time.Second {
+		cfg.t.Fatal("test took longer than 120 seconds")
+	}
+}
+
 func Randstring(n int) string {
 	b := make([]byte, 2*n)
 	crand.Read(b)
 	s := base64.URLEncoding.EncodeToString(b)
 	return s[0:n]
-}
-
-func (cfg *Config) CheckTimeout() {
-	// enforce a two minute real-time limit on each test
-	if !cfg.t.Failed() && time.Since(cfg.start) > 120*time.Second {
-		cfg.t.Fatal("test took longer than 120 seconds")
-	}
 }
 
 func makeSeed() int64 {

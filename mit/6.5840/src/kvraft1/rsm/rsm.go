@@ -90,7 +90,7 @@ func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, m
 		sm:             sm,
 		pendingSubmits: list.New(),
 	}
-	if !useRaftStateMachine {
+	if !tester.UseRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
 		go rsm.startReader()
 	}
@@ -232,7 +232,7 @@ func (rsm *RSM) startReader() {
 		rsm.mu.Unlock()
 
 	}
-	rsm.Kill()
+	//rsm.Kill() // TODO
 	DPrintf("RSM node%d: reader exit", rsm.me)
 }
 
@@ -302,16 +302,16 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	}
 }
 
-func (rsm *RSM) Kill() {
-	DPrintf("RSM node%d: Kill started", rsm.me)
-	rsm.mu.Lock()
-	for rsm.pendingSubmits.Len() > 0 {
-		element := rsm.pendingSubmits.Front()
-		val := rsm.pendingSubmits.Remove(element)
-		pendingSubmitRequest := val.(*SubmitRequest)
-		pendingSubmitRequest.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
-		//close(pendingSubmitRequest.ReplyCh) // ?
-	}
-	rsm.mu.Unlock()
-	DPrintf("RSM node%d: Kill completed", rsm.me)
-}
+// func (rsm *RSM) Kill() {
+// 	DPrintf("RSM node%d: Kill started", rsm.me)
+// 	rsm.mu.Lock()
+// 	for rsm.pendingSubmits.Len() > 0 {
+// 		element := rsm.pendingSubmits.Front()
+// 		val := rsm.pendingSubmits.Remove(element)
+// 		pendingSubmitRequest := val.(*SubmitRequest)
+// 		pendingSubmitRequest.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
+// 		//close(pendingSubmitRequest.ReplyCh) // ?
+// 	}
+// 	rsm.mu.Unlock()
+// 	DPrintf("RSM node%d: Kill completed", rsm.me)
+// }

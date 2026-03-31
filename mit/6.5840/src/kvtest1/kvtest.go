@@ -36,6 +36,17 @@ type IKVClerk interface {
 type TestClerk struct {
 	IKVClerk
 	Clnt *tester.Clnt
+	Cfg  *tester.Config
+}
+
+func (tck *TestClerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
+	tck.Cfg.OpInc()
+	return tck.IKVClerk.Put(key, value, version)
+}
+
+func (tck *TestClerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
+	tck.Cfg.OpInc()
+	return tck.IKVClerk.Get(key)
 }
 
 type IClerkMaker interface {

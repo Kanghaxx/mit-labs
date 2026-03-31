@@ -27,12 +27,12 @@ type KVServer struct {
 	mu sync.Mutex
 
 	// Your definitions here.
-	m map[string]Value
+	data map[string]Value
 }
 
 func MakeKVServer() *KVServer {
 	kv := &KVServer{
-		m: make(map[string]Value),
+		data: make(map[string]Value),
 	}
 	return kv
 }
@@ -42,7 +42,7 @@ func MakeKVServer() *KVServer {
 func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	value, ok := kv.m[args.Key]
+	value, ok := kv.data[args.Key]
 	if !ok {
 		reply.Err = rpc.ErrNoKey
 		return
@@ -57,19 +57,19 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 // If the key doesn't exist, Put installs the value if the
 // args.Version is 0, and returns ErrNoKey otherwise.
 func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
-	reply.Err = rpc.OK
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	value, ok := kv.m[args.Key]
+	value, ok := kv.data[args.Key]
 	if !ok {
 		if args.Version != 0 {
 			reply.Err = rpc.ErrNoKey
 			return
 		}
-		kv.m[args.Key] = Value{
+		kv.data[args.Key] = Value{
 			value:   args.Value,
 			version: 1,
 		}
+		reply.Err = rpc.OK
 		return
 	}
 
@@ -77,19 +77,15 @@ func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 		reply.Err = rpc.ErrVersion
 		return
 	}
-	kv.m[args.Key] = Value{
+	kv.data[args.Key] = Value{
 		value:   args.Value,
 		version: value.version + 1,
 	}
-
-}
-
-// You can ignore Kill() for this lab
-func (kv *KVServer) Kill() {
+	reply.Err = rpc.OK
 }
 
 // You can ignore all arguments; they are for replicated KVservers
-func StartKVServer(ends []*labrpc.ClientEnd, gid tester.Tgid, srv int, persister *tester.Persister) []tester.IService {
+func StartKVServer(tc *tester.TesterClnt, ends []*labrpc.ClientEnd, gid tester.Tgid, srv int, persister *tester.Persister) []any {
 	kv := MakeKVServer()
-	return []tester.IService{kv}
+	return []any{kv}
 }

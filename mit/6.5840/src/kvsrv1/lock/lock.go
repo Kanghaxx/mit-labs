@@ -20,14 +20,15 @@ type Lock struct {
 // The tester calls MakeLock() and passes in a k/v clerk; your code can
 // perform a Put or Get by calling lk.ck.Put() or lk.ck.Get().
 //
-// Use l as the key to store the "lock state" (you would have to decide
-// precisely what the lock state is).
-func MakeLock(ck kvtest.IKVClerk, l string) *Lock {
+// This interface supports multiple locks by means of the
+// lockname argument; locks with different names should be
+// independent.
+func MakeLock(ck kvtest.IKVClerk, lockname string) *Lock {
 	lk := &Lock{
 		ck:       ck,
-		lockName: l,
+		lockName: lockname,
 		clientID: kvtest.RandValue(8)}
-	ck.Put(l, "", 0)
+	ck.Put(lockname, "", 0)
 	return lk
 }
 
