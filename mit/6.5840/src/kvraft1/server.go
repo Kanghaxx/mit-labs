@@ -1,7 +1,10 @@
 package kvraft
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
+	"maps"
 	"sync"
 
 	"6.5840/kvraft1/rsm"
@@ -25,9 +28,15 @@ type KVServer struct {
 	data map[string]Value
 }
 
+type Snapshot struct {
+	Data map[string]Value
+}
+
 func (kv *KVServer) applyPut(args rpc.PutArgs) rpc.PutReply {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
+	//log.Printf("KV node%d: KV before Put apply: %v", kv.me, kv.data)
+	//defer log.Printf("KV node%d: KV after Put apply: %v", kv.me, kv.data)
 	value, exists := kv.data[args.Key]
 	if !exists {
 		if args.Version != 0 {
@@ -74,7 +83,8 @@ func (kv *KVServer) DoOp(req any) any {
 	case rpc.GetArgs:
 		return kv.applyGet(args)
 	case rpc.PutArgs:
-		return kv.applyPut(args)
+		res := kv.applyPut(args)
+		return res
 	default:
 		panic(fmt.Sprintf("Unknown command type %T", args))
 	}
@@ -82,11 +92,32 @@ func (kv *KVServer) DoOp(req any) any {
 
 func (kv *KVServer) Snapshot() []byte {
 	// Your code here
-	return nil
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	buffer := new(bytes.Buffer)
+	encoder := labgob.NewEncoder(buffer)
+	snapshot := Snapshot{
+		Data: make(map[string]Value),
+	}
+	maps.Copy(snapshot.Data, kv.data)
+	encoder.Encode(snapshot)
+	return buffer.Bytes()
 }
 
 func (kv *KVServer) Restore(data []byte) {
 	// Your code here
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	//log.Printf("KV node%d: KV before snapshot restore: %v", kv.me, kv.data)
+	buffer := bytes.NewBuffer(data)
+	decoder := gob.NewDecoder(buffer)
+	var snapshot Snapshot
+	err := decoder.Decode(&snapshot)
+	if err != nil {
+		panic(fmt.Sprintf("ERROR while decoding state: %v", err))
+	}
+	kv.data = snapshot.Data
+	//log.Printf("KV node%d:KV after snapshot restore: %v", kv.me, kv.data)
 }
 
 func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
@@ -133,8 +164,11 @@ func StartKVServer(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, persist
 
 	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)
 	// You may need initialization code here.
-	kv.data = make(map[string]Value)
+	if kv.data == nil {
+		kv.data = make(map[string]Value)
+	}
 
+	//log.Printf("KV node%d started.", kv.me)
 	return []any{kv, kv.rsm.Raft()}
 }
 
