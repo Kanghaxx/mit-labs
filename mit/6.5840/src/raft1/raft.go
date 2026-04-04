@@ -184,9 +184,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 func (rf *Raft) startLogApply() {
 	for rf.killed() == false {
-
-		rf.applySnapshot() // restore after reboot. Must apply outside Make() because the client hasn't received the object yet and isn't listening on applyCh there
-
 		applyMsg := raftapi.ApplyMsg{CommandValid: true}
 
 		rf.mu.Lock()
@@ -1308,11 +1305,17 @@ func (rf *Raft) absToLocal(absIndex int) int {
 
 func (rf *Raft) printLog() {
 	s := "["
-	for _, v := range rf.log {
-		s += fmt.Sprintf(" %v(%v) ", v.Command, v.Term)
+	for i, v := range rf.log {
+		s += fmt.Sprintf(" {[%d] %v(%v)} ", i+1, v.Command, v.Term)
 	}
 	s += "]"
 	log.Printf("Raft instance%d log: %v", rf.me, s)
+}
+
+func (rf *Raft) PrintLog() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.printLog()
 }
 
 // return currentTerm and whether this server
@@ -1427,6 +1430,8 @@ func (rf *Raft) readPersist(data []byte) {
 	// 3D
 	rf.lastIncludedIndexInSnapshot = loadedState.LastIncludedIndex
 	rf.lastIncludedTermInSnapshot = loadedState.LastIncludedTerm
+	rf.lastApplied = rf.lastIncludedIndexInSnapshot // State Machine applies the stored snapshot by its own on reload
+	rf.commitIndex = rf.lastIncludedIndexInSnapshot
 }
 
 func (rf *Raft) readSnapshot(data []byte) {
@@ -1447,22 +1452,18 @@ func (rf *Raft) PersistBytes() int {
 	return rf.persister.RaftStateSize()
 }
 
-// the tester doesn't halt goroutines created by Raft after each test,
-// but it does call the Kill() method. your code can use killed() to
-// check whether Kill() has been called. the use of atomic avoids the
-// need for a lock.
-//
-// the issue is that long-running goroutines use memory and may chew
-// up CPU time, perhaps causing later tests to fail and generating
-// confusing debug output. any goroutine with a long-running loop
-// should call killed() to check whether it should stop.
-// func (rf *Raft) Kill() {
-// 	atomic.StoreInt32(&rf.dead, 1)
-// 	// Your code here, if desired.
-// 	//log.Printf("Raft isntance%d: someone called Kill", rf.me)
-// 	<-rf.applyCompletedCh // wait for apply-loop to exit so it wouldn't send to a closed channel
-// 	close(rf.applyCh)
-// }
+// TODO
+// not called anymore in a newer code version (2026)
+// call manually from RSM?
+// or remove all killed()-based conditions?
+func (rf *Raft) Kill() {
+	atomic.StoreInt32(&rf.dead, 1)
+	// Your code here, if desired.
+	//
+	//log.Printf("Raft isntance%d: someone called Kill", rf.me)
+	//<-rf.applyCompletedCh // wait for apply-loop to exit so it wouldn't send to a closed channel
+	//close(rf.applyCh)
+}
 
 func (rf *Raft) killed() bool {
 	z := atomic.LoadInt32(&rf.dead)
