@@ -8,13 +8,12 @@ import (
 	"6.5840/kvsrv1/rpc"
 	"6.5840/labgob"
 	"6.5840/labrpc"
-	models "6.5840/models1"
 	tester "6.5840/tester1"
 )
 
 type Value struct {
-	value   string
-	version uint64
+	Value   string
+	Version uint64
 }
 
 type KVServer struct {
@@ -26,48 +25,43 @@ type KVServer struct {
 	data map[string]Value
 }
 
-func (kv *KVServer) DoPut(args rpc.PutArgs) rpc.PutReply {
-	var reply rpc.PutReply = rpc.PutReply{}
-	reply.Err = rpc.OK
+func (kv *KVServer) applyPut(args rpc.PutArgs) rpc.PutReply {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	value, ok := kv.data[args.Key]
-	if !ok {
+	value, exists := kv.data[args.Key]
+	if !exists {
 		if args.Version != 0 {
-			reply.Err = rpc.ErrNoKey
-			return reply
+			return rpc.PutReply{Err: rpc.ErrNoKey}
 		}
 		kv.data[args.Key] = Value{
-			value:   args.Value,
-			version: 1,
+			Value:   args.Value,
+			Version: 1,
 		}
-		return reply
+		return rpc.PutReply{Err: rpc.OK}
 	}
 
-	if value.version != uint64(args.Version) {
-		reply.Err = rpc.ErrVersion
-		return reply
+	if value.Version != uint64(args.Version) {
+		return rpc.PutReply{Err: rpc.ErrVersion}
 	}
 	kv.data[args.Key] = Value{
-		value:   args.Value,
-		version: value.version + 1,
+		Value:   args.Value,
+		Version: value.Version + 1,
 	}
-	return reply
+	return rpc.PutReply{Err: rpc.OK}
 }
 
-func (kv *KVServer) DoGet(args rpc.GetArgs) rpc.GetReply {
-	var reply rpc.GetReply = rpc.GetReply{}
+func (kv *KVServer) applyGet(args rpc.GetArgs) rpc.GetReply {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	value, ok := kv.data[args.Key]
-	if !ok {
-		reply.Err = rpc.ErrNoKey
-		return reply
+	value, exists := kv.data[args.Key]
+	if !exists {
+		return rpc.GetReply{Err: rpc.ErrNoKey}
 	}
-	reply.Value = value.value
-	reply.Version = rpc.Tversion(value.version)
-	reply.Err = rpc.OK
-	return reply
+	return rpc.GetReply{
+		Value:   value.Value,
+		Version: rpc.Tversion(value.Version),
+		Err:     rpc.OK,
+	}
 }
 
 // To type-cast req to the right type, take a look at Go's type switches or type
@@ -78,9 +72,9 @@ func (kv *KVServer) DoGet(args rpc.GetArgs) rpc.GetReply {
 func (kv *KVServer) DoOp(req any) any {
 	switch args := req.(type) {
 	case rpc.GetArgs:
-		return kv.DoGet(args)
+		return kv.applyGet(args)
 	case rpc.PutArgs:
-		return kv.DoPut(args)
+		return kv.applyPut(args)
 	default:
 		panic(fmt.Sprintf("Unknown command type %T", args))
 	}
@@ -131,10 +125,10 @@ func StartKVServer(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, persist
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(rsm.Op{})
-	labgob.Register(rsm.OpID{})
+	//labgob.Register(rsm.OpID{})
 	labgob.Register(rpc.PutArgs{})
 	labgob.Register(rpc.GetArgs{})
-	labgob.Register(models.KvInput{})
+	labgob.Register(Value{})
 	kv := &KVServer{me: me}
 
 	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)

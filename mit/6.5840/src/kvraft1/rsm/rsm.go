@@ -2,6 +2,7 @@ package rsm
 
 import (
 	"container/list"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -14,8 +15,7 @@ import (
 )
 
 const Debug = false
-
-var useRaftStateMachine bool // to plug in another raft besided raft1
+const DebugImp = false
 
 type OpID struct {
 	ServerId         int
@@ -62,8 +62,9 @@ type RSM struct {
 	maxraftstate int // snapshot if log grows this big
 	sm           StateMachine
 	// Your definitions here.
-	lastId         int
-	pendingSubmits *list.List
+	lastId          int
+	pendingSubmits  *list.List
+	appliedCommands *list.List // for debug logging
 }
 
 // servers[] contains the ports of the set of
@@ -84,11 +85,12 @@ type RSM struct {
 func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, maxraftstate int, sm StateMachine) *RSM {
 	raft.DPrintf("RSM node%d: starting", me)
 	rsm := &RSM{
-		me:             me,
-		maxraftstate:   maxraftstate,
-		applyCh:        make(chan raftapi.ApplyMsg),
-		sm:             sm,
-		pendingSubmits: list.New(),
+		me:              me,
+		maxraftstate:    maxraftstate,
+		applyCh:         make(chan raftapi.ApplyMsg),
+		sm:              sm,
+		pendingSubmits:  list.New(),
+		appliedCommands: list.New(),
 	}
 	if !tester.UseRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
@@ -106,10 +108,17 @@ func DPrintf(format string, a ...interface{}) {
 		log.Printf(format, a...)
 	}
 }
+
+func DPrintfImp(format string, a ...interface{}) {
+	if DebugImp {
+		log.Printf(format, a...)
+	}
+}
+
 func (rsm *RSM) startReader() {
 	//log.Printf("RSM node%d: starting reader", rsm.me)
 	for applyMsg := range rsm.applyCh {
-		// AI slop:
+
 		// Handle snapshot messages first
 		// if applyMsg.SnapshotValid {
 		// 	log.Printf("RSM node%d: READER: received snapshot. index=%d term=%d", rsm.me, applyMsg.SnapshotIndex, applyMsg.SnapshotTerm)
@@ -119,41 +128,33 @@ func (rsm *RSM) startReader() {
 		// 	// will handle pending submits as new ApplyMsg entries arrive.
 		// 	continue
 		// }
-		// // Ignore non-command messages
-		// if !applyMsg.CommandValid {
-		// 	log.Printf("RSM node%d: READER: received non-command ApplyMsg, skipping", rsm.me)
-		// 	continue
-		// }
 
-		// // Be defensive: Command may be nil or of unexpected type when tests
-		// // simulate network partitions/crashes. Avoid panics from type assertions.
-		// applyOp, ok := applyMsg.Command.(Op)
-		// if !ok {
-		// 	log.Printf("RSM node%d: READER: unexpected command type %T (nil?), skipping", rsm.me, applyMsg.Command)
-		// 	continue
-		// }
-
-		// Ignore non-command messages
 		if !applyMsg.CommandValid {
-			log.Printf("RSM node%d: READER: received non-command ApplyMsg, skipping", rsm.me)
+			DPrintfImp("RSM node%d: READER: received non-command ApplyMsg, skipping", rsm.me)
 			continue
 		}
 
+		// TODO probably increment lastIncludedIndex in a lock here
+		// TODO or maybe reader calculates % and calls Snapshot() here without a lock. Bad idea: apply could stop but Start() could proceed and oversize
+		// TODO or even better - wait on 2 channels so the reader could either aplpy messagges and increase lastIncludedIndex OR take a snapshot and pass it to Raft. So this will be atomic
 		applyOp := applyMsg.Command.(Op)
 
 		// call DoOp() here because followers don't have pending Submit goroutines
 		result := rsm.sm.DoOp(applyOp.Command)
 		DPrintf("RSM node%d: READER: DoOp executed. applyOp.ID=%v applyOp.index=%d", rsm.me, applyOp.ID, applyMsg.CommandIndex)
 
-		// dequeue and compare op with dequeued items
+		// Dequeue pending Submit call if any and compare it with applyOp
 		rsm.mu.Lock()
+
+		//rsm.appliedCommands.PushBack(applyMsg) // for debug
+
 		if rsm.pendingSubmits.Len() > 0 {
 			// Peek first and dequeue only if queued.index == applied.index:
 			// applied.index == queued.index: dequeue, check IDs equal and call DoOp()
 			// applied.index < queued.index: the peer just became a leader and queued 1 submit to the top of the log,
 			// 	 but applyCh still applies older committed records from previous leaders.
 			//   In this case: skip and only call DoOp()
-			// applied.index > queued.index: probably impossible. Log grows monolonically only.
+			// applied.index > queued.index: impossible. Log grows monolonically only.
 			pendingSubmit := rsm.pendingSubmits.Front() // peek
 			pendingSubmitData := pendingSubmit.Value.(*SubmitRequest)
 			if applyMsg.CommandIndex == pendingSubmitData.CommandIndex {
@@ -161,16 +162,20 @@ func (rsm *RSM) startReader() {
 					// received the same command that was added at that index: dequeue it and reply OK
 					rsm.pendingSubmits.Remove(pendingSubmit) // dequeue if applying the same command
 					pendingSubmitData.ReplyCh <- SubmitResponse{Result: result, Error: rpc.OK}
-					// log.Printf("RSM node%d: READER: sending OK response. applyOp.command=%+v applyOp.command.type=%T applyOp.ID=%v applyOp.index=%d; queueed.command=%+v queued.id=%v queued.index=%d; DoOP.result=%+v DoOP.result.type=%T",
-					// 	rsm.me,
-					// 	applyOp.Command, applyOp.Command, applyOp.ID, applyMsg.CommandIndex,
-					// 	pendingSubmitData.Operation.Command, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex,
-					// 	result, result)
+					DPrintfImp("RSM node%d: READER: sending OK response. applyOp.command=%+v applyOp.command.type=%T applyOp.ID=%v applyOp.index=%d; queueed.command=%+v queued.id=%v queued.index=%d; DoOP.result=%+v DoOP.result.type=%T",
+						rsm.me,
+						applyOp.Command, applyOp.Command, applyOp.ID, applyMsg.CommandIndex,
+						pendingSubmitData.Operation.Command, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex,
+						result, result)
 				} else {
-					// received a different command at the same index: cancel all pending submits having term < applyMsg.term
-					for pendingSubmit != nil && pendingSubmitData.CommandTerm < applyMsg.CommandTerm {
+					// Received a different command at the same index: cancel all pending submits.
+					// It's probably safe: if a different command appears on the submitted index, then the node isn'a a leader anymore and all its subsequent log entries will be discarded as being garbage
+					pendingSubmitData.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
+					DPrintfImp("RSM node%d: READER: sending ErrWrongLeader response. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
+						rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
+					for pendingSubmit != nil {
 						pendingSubmitData.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
-						DPrintf("RSM node%d: READER: sending ErrWrongLeader response. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
+						DPrintfImp("RSM node%d: READER: sending ErrWrongLeader response. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
 							rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
 						rsm.pendingSubmits.Remove(pendingSubmit)
 						pendingSubmit = rsm.pendingSubmits.Front() // peek
@@ -180,60 +185,48 @@ func (rsm *RSM) startReader() {
 					}
 				}
 			} else if applyMsg.CommandIndex < pendingSubmitData.CommandIndex {
-				DPrintf("RSM node%d: READER: skipping applyOp.index < queued.index. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
+				DPrintfImp("RSM node%d: READER: skipping applyOp.index < queued.index. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
 					rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
 			} else {
-				//panic(fmt.Sprintf("RSM node%d: READER: unexpected applyOp.index > queued.index. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
-				//	rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex))
-
-				// TODO
-				// AI:
-				//  The comment says "probably impossible. Log grows monotonically only", but it's actually possible in a partitioned network. The issue is:
-
-				// A node is leader and submits commands (indices 1,2,3...)
-				// The node gets partitioned and becomes a follower
-				// The new leader has already advanced the log beyond where this node was
-				// When this node reconnects, Raft applies committed entries it had missed, and those entries can have indices higher than what was at the top of the pendingSubmits queue
-				// The fix is to handle this case: when we receive an applied command with an index higher than the oldest pending submit, we should skip the pending submit (since it may have been superseded or the leader changed) and continue. Let me update the code:
-
-				// Summary of Fixes
-				// 1. Client Put Logic (client.go)
-				// Problem: The retry tracking was incorrect. It only counted failed RPC calls, not all retry attempts to different servers.
-
-				// Solution: Changed attempt to be incremented for every server we try (whether the RPC fails or returns ErrWrongLeader), starting from 0. This ensures we correctly detect resends and return ErrMaybe when appropriate.
-
-				// 2. RSM Reader Logic (rsm.go)
-				// Problem: The code panicked when an applied operation's index was higher than the oldest pending submit's index. The comment said this was "probably impossible" but it IS possible in partitioned networks.
-
-				// Solution: Instead of panicking, the code now handles this gracefully by:
-
-				// Recognizing this happens when leadership changes and new log entries are committed
-				// Dequeuing all pending submits with indices lower than the current apply index
-				// Returning ErrWrongLeader for those submits since they may never be committed
-				// This allows the RSM to continue operating correctly during network partitions
-				// These fixes ensure that the KVRaft implementation correctly handles network partitions while maintaining consistency between clients and servers.
-
-				// applyMsg.CommandIndex > pendingSubmitData.CommandIndex
-				// This can happen in a partitioned network: we queued a submit at some index,
-				// but the leader changed and log entries beyond that were committed.
-				// We don't know if our submit will ever be committed, so treat it as lost.
-				for pendingSubmit != nil && applyMsg.CommandIndex > pendingSubmitData.CommandIndex {
-					pendingSubmitData.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
-					DPrintf("RSM node%d: READER: sending ErrWrongLeader due to gap. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
-						rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
-					rsm.pendingSubmits.Remove(pendingSubmit)
-					pendingSubmit = rsm.pendingSubmits.Front()
-					if pendingSubmit != nil {
-						pendingSubmitData = pendingSubmit.Value.(*SubmitRequest)
-					}
-				}
+				// applyMsg.CommandIndex > pendingSubmitData.CommandIndex:
+				// This must not be possible. it's guaranteed that Raft eventually will pass some command at queued.index. It must do that in order to keep all State Machines in sync.
+				// So if there is a pending Submit containing index i (received from Start call), eventually a command at i will arrive at applyCh. But it could be a different command though.
+				// Only if the node is partitioned it will not see new commands committed and applied as long as partition remains, which could last forever (this is OK).
+				// Tests: passed 300 of 300 runs
+				//rsm.debugLog()
+				panic(fmt.Sprintf("RSM node%d: READER: unexpected applyOp.index > queued.index. applyOp.ID=%v applyOp.index=%d applyOp.term=%d; queued.ID=%v queued.index=%d queued.term=%d",
+					rsm.me,
+					applyOp.ID, applyMsg.CommandIndex, applyMsg.CommandTerm,
+					pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex, pendingSubmitData.CommandTerm))
 			}
 		}
 		rsm.mu.Unlock()
-
 	}
-	//rsm.Kill() // TODO
+	rsm.Kill()
 	DPrintf("RSM node%d: reader exit", rsm.me)
+}
+
+func (rsm *RSM) debugLog() {
+	// log applied commands on this peer
+	s := "["
+	for elt := rsm.appliedCommands.Front(); elt != nil; elt = elt.Next() {
+		val := elt.Value.(raftapi.ApplyMsg)
+		s += fmt.Sprintf("{commandIndex=%d commandTerm=%v command=%v} ", val.CommandIndex, val.CommandTerm, val.Command)
+	}
+	s += "]"
+	log.Printf("RSM node%d applied commands: %v", rsm.me, s)
+
+	// log pending Submis on this peer
+	s = "["
+	for elt := rsm.pendingSubmits.Front(); elt != nil; elt = elt.Next() {
+		val := elt.Value.(*SubmitRequest)
+		s += fmt.Sprintf("{commandIndex=%d commandTerm=%v command=%v ID=%v} ", val.CommandIndex, val.CommandTerm, val.Operation.Command, val.Operation.ID)
+	}
+	s += "]"
+	log.Printf("RSM node%d pending submits: %v", rsm.me, s)
+
+	// log Raft log
+	rsm.rf.PrintLog()
 }
 
 // Submit a command to Raft, and wait for it to be committed.  It
@@ -248,10 +241,9 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 
 	// your code here
 	rsm.mu.Lock()
-	// ID
-	// autoinc int: bad idea because it could be same on different peers.
-	// struct {me, autoinc int}: what if server reloads?
-	// guid? OK but inefficient (AI)
+	// Generating an ID for this operation to compare applied and submitted operations when it will be applied
+	// Looks like ID as a struct of {me seqId} is better choice than GUID (inefficient) and just a seqID (could overlap with other nodes)
+	// TODO move to a method
 	rsm.lastId++
 	op := Op{
 		ID:      OpID{rsm.me, rsm.lastId},
@@ -259,7 +251,8 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	}
 	DPrintf("RSM node%d: calling Start for ID=%v...", rsm.me, op.ID)
 	index, term, isLeader := rsm.rf.Start(op)
-	// log.Printf("RSM node%d: Start executed for op.ID=%v op.command=%+v. index=%d, term=%d, isLeader=%v", rsm.me, op.ID, op.Command, index, term, isLeader)
+	DPrintfImp("RSM node%d: Start executed for op.ID=%v op.command=%+v. index=%d, term=%d, isLeader=%v", rsm.me, op.ID, op.Command, index, term, isLeader)
+	//log.Printf("RSM node%d: Start executed for op.ID=%v op.command=%+v. index=%d, term=%d, isLeader=%v", rsm.me, op.ID, op.Command, index, term, isLeader)
 	if !isLeader {
 		DPrintf("RSM node%d: not a leader, returning error. index=%d, term=%d, isLeader=%v", rsm.me, index, term, isLeader)
 		rsm.mu.Unlock()
@@ -271,28 +264,38 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 		CommandIndex: index,
 		CommandTerm:  term,
 	}
+	// Between Start() and enqueuing the command, it could already have been applied (very unlikely but so).
+	// This is safe: the reader will apply the command to state machine, but then it has to wait on the mutex until the submit enqueued and releases the lock.
+	// And only then in will dequeue the submit and send a response received from State Machine here to be returned to the client.
 	pendingSubmit := rsm.pendingSubmits.PushBack(r)
+	pendingSubmitData := pendingSubmit.Value.(*SubmitRequest)
 	rsm.mu.Unlock()
 
+	// Now wait for the reply from the reader arrived in replyCh or timeout ellapsed
 	DPrintf("RSM node%d: waiting to complete for index=%d op.ID=%v", rsm.me, index, op.ID)
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
+	timeout := time.NewTicker(200 * time.Millisecond)
+	defer timeout.Stop()
 	for {
 		select {
 		case response := <-r.ReplyCh:
-			DPrintf("RSM node%d: Submit received result for op.ID=%v: error=%v result=%v", rsm.me, op.ID, response.Error, response.Result)
+			DPrintfImp("RSM node%d: Submit received result for op.ID=%v queued.CommandIndex=%d: error=%v result=%v", rsm.me, op.ID, pendingSubmitData.CommandIndex, response.Error, response.Result)
 			return response.Error, response.Result
-		// fallback: check current peer state if the cluster is inactive and reader-goroutine can't remove pending submits due to no new applied commands in applyCh
-		// probably not needed: if there are no new entries applied, we couldn't know if the added entries are going to be committed or deleted from raft's log.
-		//   so it's OK to wait until the cluster recovers
-		case <-ticker.C:
-			pendingSubmitData := pendingSubmit.Value.(*SubmitRequest)
+		// Fallback: check current peer state if the cluster is inactive and reader-goroutine can't remove pending submits due to no new applied commands in applyCh.
+		// Without this fallback sometimes tests will stuck:
+		// 		=== RUN   TestUnreliable4B
+		// 		Test: many clients (4B many clients) (unreliable network)...
+		// 		...and waits forever
+		case <-timeout.C:
 			newTerm, _ := rsm.rf.GetState()
+			// Cancel the Submit only if the Raft term increased: corresponding leader has lost leadership.
+			// If the correspoding leader hasn't lost leadership, the command eventually will be applied and the Submit will receive a reply.
+			// In either case (network partition, leader crash etc), the leader will lose leadership, and the command may never be committed and applied,
+			//    and if there are no more commands, the Submit could stuck forever (and it does sometimes).
 			if pendingSubmitData.CommandTerm < newTerm {
 				rsm.mu.Lock()
 				if rsm.pendingSubmits.Len() > 0 {
-					DPrintf("RSM node%d: Submit canceled due timeout for op.ID=%v term=%d due to new term=%d", rsm.me, op.ID, pendingSubmitData.CommandTerm, newTerm)
-					rsm.pendingSubmits.Remove(pendingSubmit) // seems to be safe: if already removed from reader the call does nothing
+					DPrintfImp("RSM node%d: Submit canceled due timeout for op.ID=%v term=%d due to new term=%d", rsm.me, op.ID, pendingSubmitData.CommandTerm, newTerm)
+					rsm.pendingSubmits.Remove(pendingSubmit) // Removing here seems to be safe: if already removed from reader the call does nothing
 					rsm.mu.Unlock()
 					return rpc.ErrWrongLeader, nil
 				}
@@ -302,16 +305,17 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	}
 }
 
-// func (rsm *RSM) Kill() {
-// 	DPrintf("RSM node%d: Kill started", rsm.me)
-// 	rsm.mu.Lock()
-// 	for rsm.pendingSubmits.Len() > 0 {
-// 		element := rsm.pendingSubmits.Front()
-// 		val := rsm.pendingSubmits.Remove(element)
-// 		pendingSubmitRequest := val.(*SubmitRequest)
-// 		pendingSubmitRequest.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
-// 		//close(pendingSubmitRequest.ReplyCh) // ?
-// 	}
-// 	rsm.mu.Unlock()
-// 	DPrintf("RSM node%d: Kill completed", rsm.me)
-// }
+// Is called from reader after applyCh is closed from outside
+func (rsm *RSM) Kill() {
+	DPrintf("RSM node%d: Kill started", rsm.me)
+	rsm.mu.Lock()
+	for rsm.pendingSubmits.Len() > 0 {
+		element := rsm.pendingSubmits.Front()
+		val := rsm.pendingSubmits.Remove(element)
+		pendingSubmitRequest := val.(*SubmitRequest)
+		pendingSubmitRequest.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
+	}
+	rsm.mu.Unlock()
+	//rsm.rf.Kill() // TODO how to kill raft? And is it needed? rf.Kill() is not in inteface. Add it there?
+	DPrintf("RSM node%d: Kill completed", rsm.me)
+}
