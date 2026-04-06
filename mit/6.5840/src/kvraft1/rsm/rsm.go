@@ -21,7 +21,7 @@ const Debug = false
 const DebugImp = false
 
 const (
-	raftStateShrinkRate = 0.7
+	raftStateShrinkRate = 0.4
 )
 
 type OpID struct {
@@ -135,9 +135,11 @@ func (rsm *RSM) raftStateSizeTooLarge() bool {
 	if rsm.maxraftstate == -1 {
 		return false
 	}
-	raftStateBytes := rsm.rf.PersistBytes()
-	limitBytes := int(float64(rsm.maxraftstate) * raftStateShrinkRate)
-	return raftStateBytes > limitBytes
+	// raftStateBytes := rsm.rf.PersistBytes()
+	// limitBytes := int(float64(rsm.maxraftstate) * raftStateShrinkRate)
+	// return raftStateBytes > limitBytes
+
+	return rsm.rf.PersistBytes() >= rsm.maxraftstate
 }
 
 func (rsm *RSM) restoreSnapshot(data []byte) {
@@ -162,85 +164,37 @@ func (rsm *RSM) restoreSnapshot(data []byte) {
 
 func (rsm *RSM) startReader() {
 	//log.Printf("RSM node%d: starting reader", rsm.me)
-	ticker := time.NewTicker(10 * time.Millisecond) // probably too aggressive
-	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			if rsm.raftStateSizeTooLarge() {
-				// Do we need to store lastAppliedIndex with snapshot?
-				// Raft requires an index passed along with snapshot bytes.
-				// RSM needs to restore persisted snapshot on reload: pass it to KV.
-				// And if index is not persisted by RSM, on reload there is no index, just snapshot bytes.
+	for applyMsg := range rsm.applyCh {
 
-				// when raft state size exceeded:
-				// ask for snapshot from KV
-				// pass snapshot and lastAppliedIndex to Raft
+		if applyMsg.SnapshotValid {
+			//log.Printf("RSM node%d: READER: received snapshot. index=%d term=%d", rsm.me, applyMsg.SnapshotIndex, applyMsg.SnapshotTerm)
+
+			// lock is not needed: State Machine and lastAppliedIndex are updated only from the seconds case of this select
+			if applyMsg.SnapshotIndex > rsm.lastAppliedIndex {
+				rsm.restoreSnapshot(applyMsg.Snapshot)        // deserializes snapshot, restores State Machine state and updates lastAppliedIndex
+				rsm.lastAppliedIndex = applyMsg.SnapshotIndex // TODO is it needed? could it diverge from index in snapshot?
+
 				rsm.mu.Lock()
-				snapshot := rsm.sm.Snapshot()
-				rsm.mu.Unlock()
-				snapshotData := SnapshotRSMData{
-					Snapshot:          snapshot,
-					LastIncludedIndex: rsm.lastAppliedIndex,
-				}
-
-				buffer := new(bytes.Buffer)
-				encoder := labgob.NewEncoder(buffer)
-				encoder.Encode(snapshotData)
-
-				rsm.rf.Snapshot(rsm.lastAppliedIndex, buffer.Bytes())
-
-			}
-		case applyMsg, ok := <-rsm.applyCh:
-			if !ok { // applyCh closed
-				rsm.Kill()
-				DPrintf("RSM node%d: reader exit", rsm.me)
-				return
-			}
-
-			if applyMsg.SnapshotValid {
-				//log.Printf("RSM node%d: READER: received snapshot. index=%d term=%d", rsm.me, applyMsg.SnapshotIndex, applyMsg.SnapshotTerm)
-
-				// lock is not needed: State Machine and lastAppliedIndex are updated only from the seconds case of this select
-				if applyMsg.SnapshotIndex > rsm.lastAppliedIndex {
-					rsm.restoreSnapshot(applyMsg.Snapshot)        // deserializes snapshot, restores State Machine state and updates lastAppliedIndex
-					rsm.lastAppliedIndex = applyMsg.SnapshotIndex // TODO is it needed? could it diverge from index in snapshot?
-
-					// clear all pending submits
-					if rsm.pendingSubmits.Len() > 0 {
-						pendingSubmit := rsm.pendingSubmits.Front() // peek
-						pendingSubmitData := pendingSubmit.Value.(*SubmitRequest)
-						for pendingSubmit != nil {
-							pendingSubmitData.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
-							//DPrintfImp("RSM node%d: READER: sending ErrWrongLeader response. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
-							//	rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
-							rsm.pendingSubmits.Remove(pendingSubmit)
-							pendingSubmit = rsm.pendingSubmits.Front() // peek
-							if pendingSubmit != nil {
-								pendingSubmitData = pendingSubmit.Value.(*SubmitRequest)
-							}
+				// clear all pending submits
+				if rsm.pendingSubmits.Len() > 0 {
+					pendingSubmit := rsm.pendingSubmits.Front() // peek
+					pendingSubmitData := pendingSubmit.Value.(*SubmitRequest)
+					for pendingSubmit != nil {
+						pendingSubmitData.ReplyCh <- SubmitResponse{Result: nil, Error: rpc.ErrWrongLeader}
+						//DPrintfImp("RSM node%d: READER: sending ErrWrongLeader response. applyOp.ID=%v applyOp.index=%d; queued.id=%v queued.index=%d",
+						//	rsm.me, applyOp.ID, applyMsg.CommandIndex, pendingSubmitData.Operation.ID, pendingSubmitData.CommandIndex)
+						rsm.pendingSubmits.Remove(pendingSubmit)
+						pendingSubmit = rsm.pendingSubmits.Front() // peek
+						if pendingSubmit != nil {
+							pendingSubmitData = pendingSubmit.Value.(*SubmitRequest)
 						}
-
 					}
 				}
-
-				// TODO set lastAppliedIndex = snapshot.index or snapshot.LastIncludedIndex?
-
-				// TODO why term exists in applyMsg?
-				//applyMsg.SnapshotTerm
-
-				continue
+				rsm.mu.Unlock()
 			}
+		} else if applyMsg.CommandValid {
 
-			if !applyMsg.CommandValid {
-				DPrintfImp("RSM node%d: READER: received non-command ApplyMsg, skipping", rsm.me)
-				continue
-			}
-
-			// TODO probably increment lastIncludedIndex in a lock here
-			// TODO or maybe reader calculates % and calls Snapshot() here without a lock. Bad idea: apply could stop but Start() could proceed and oversize
-			// TODO or even better - wait on 2 channels so the reader could either aplpy messagges and increase lastIncludedIndex OR take a snapshot and pass it to Raft. So this will be atomic
 			applyOp := applyMsg.Command.(Op)
 
 			// call DoOp() here because followers don't have pending Submit goroutines
@@ -314,7 +268,34 @@ func (rsm *RSM) startReader() {
 			}
 			rsm.mu.Unlock()
 		}
+
+		// Create snapshot
+		if rsm.raftStateSizeTooLarge() {
+			// Do we need to store lastAppliedIndex with snapshot?
+			// Raft requires an index passed along with snapshot bytes.
+			// RSM needs to restore persisted snapshot on reload: pass it to KV.
+			// And if index is not persisted by RSM, on reload there is no index, just snapshot bytes.
+
+			// when raft state size exceeded:
+			// ask for snapshot from KV
+			// pass snapshot and lastAppliedIndex to Raft
+			rsm.mu.Lock()
+			lastAppliedIndex := rsm.lastAppliedIndex
+			snapshot := rsm.sm.Snapshot()
+			snapshotData := SnapshotRSMData{
+				Snapshot:          snapshot,
+				LastIncludedIndex: lastAppliedIndex,
+			}
+			rsm.mu.Unlock()
+
+			buffer := new(bytes.Buffer)
+			encoder := labgob.NewEncoder(buffer)
+			encoder.Encode(snapshotData)
+
+			rsm.rf.Snapshot(lastAppliedIndex, buffer.Bytes())
+		}
 	}
+	rsm.Kill()
 }
 
 func (rsm *RSM) debugLog() {
@@ -360,15 +341,18 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 		ID:      OpID{rsm.me, rsm.lastId},
 		Command: req,
 	}
+
 	DPrintf("RSM node%d: calling Start for ID=%v...", rsm.me, op.ID)
 	index, term, isLeader := rsm.rf.Start(op)
 	DPrintfImp("RSM node%d: Start executed for op.ID=%v op.command=%+v. index=%d, term=%d, isLeader=%v", rsm.me, op.ID, op.Command, index, term, isLeader)
+
 	//log.Printf("RSM node%d: Start executed for op.ID=%v op.command=%+v. index=%d, term=%d, isLeader=%v", rsm.me, op.ID, op.Command, index, term, isLeader)
 	if !isLeader {
 		DPrintf("RSM node%d: not a leader, returning error. index=%d, term=%d, isLeader=%v", rsm.me, index, term, isLeader)
 		rsm.mu.Unlock()
 		return rpc.ErrWrongLeader, nil // i'm dead, try another server.
 	}
+
 	r := &SubmitRequest{
 		ReplyCh:      make(chan SubmitResponse, 1),
 		Operation:    op,
