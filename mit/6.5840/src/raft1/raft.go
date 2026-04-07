@@ -186,18 +186,6 @@ func (rf *Raft) startLogApply() {
 		applyMsg := raftapi.ApplyMsg{CommandValid: true}
 
 		rf.mu.Lock()
-		// AI slop: If the log was trimmed (snapshot), we must skip the trimmed part.
-		// causes various issues
-		// if rf.lastApplied < rf.lastIncludedIndexInSnapshot {
-		// 	rf.lastApplied = rf.lastIncludedIndexInSnapshot
-		// }
-		// may be causing error:
-		// === RUN   TestSnapshotInstallCrash3D
-		// Test (3D): install snapshots (crash) (reliable network)...
-		// info: wrote visualization to /tmp/porcupine-4198257289.html
-		//     test.go:258: server 0 apply out of order, expected index 220, got 230
-		// --- FAIL: TestSnapshotInstallCrash3D (17.37s)
-
 		// "If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)"
 		applyLog := rf.commitIndex > rf.lastApplied
 		if applyLog {
@@ -221,15 +209,14 @@ func (rf *Raft) startLogApply() {
 			rf.applyCh <- applyMsg
 			//log.Printf("Raft instance%d command applied: %v", rf.me, applyMsg)
 
-			//rf.mu.Lock()
+			//rf.mu.Lock() // debug
 			//DPrintf("Raft instance%d has applied command at log index=%d. lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d", rf.me, rf.lastApplied, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
 			//rf.printLog()
 			//rf.mu.Unlock()
+		} else {
+			time.Sleep(time.Duration(applyEntriesPeriodicityMs) * time.Millisecond)
 		}
-
 		//rf.mu.Unlock() // causes deadlock (ensured)
-
-		time.Sleep(time.Duration(applyEntriesPeriodicityMs) * time.Millisecond)
 	}
 	rf.applyCompletedCh <- true
 }
@@ -469,18 +456,6 @@ func (rf *Raft) decreaseFollowerWatermarksOnLeader(serverid int, oldNextIndex in
 
 }
 
-func (rf *Raft) handleInstallSnapshot2(leaderTerm int, lastIncludedIndex int, lastIncludedTerm int, data []byte) (currentTerm int) {
-	rf.mu.Lock()
-	currentTerm = rf.currentTerm
-	installed := rf.installSnapshotReceivedFromLeader(leaderTerm, lastIncludedIndex, lastIncludedTerm, data)
-	rf.mu.Unlock()
-	if installed {
-		// 8. Reset state machine using snapshot contents (and load snapshot’s cluster configuration)
-		rf.applySnapshot() // TODO probably don't apply here. Mb snapshot could be applied in apply loop thread. Pros: leader's RPC-calling thread is released earlier
-	}
-	return currentTerm
-}
-
 func (rf *Raft) handleInstallSnapshot(leaderTerm int, lastIncludedIndex int, lastIncludedTerm int, data []byte) (currentTerm int) {
 	rf.mu.Lock()
 	currentTerm = rf.currentTerm
@@ -504,19 +479,13 @@ func (rf *Raft) handleInstallSnapshot(leaderTerm int, lastIncludedIndex int, las
 	lastIncludedIndexLocal := rf.absToLocal(lastIncludedIndex)
 	if (lastIncludedIndexLocal >= 0) && (lastIncludedIndexLocal < len(rf.log)) && (rf.log[lastIncludedIndexLocal].Term == lastIncludedTerm) {
 		if lastIncludedIndexLocal == len(rf.log)-1 {
-			//rf.log = rf.log[:0]
 			rf.log = make([]LogEntry, 0, 10)
 		} else {
-			//rf.log = rf.log[lastIncludedIndexLocal+1:]
-			// newLog := make([]LogEntry, len(rf.log)-lastIncludedIndexLocal-1)
-			// copy(newLog, rf.log[lastIncludedIndexLocal+1:])
-			// rf.log = newLog
 			rf.log = append([]LogEntry(nil), rf.log[lastIncludedIndexLocal+1:]...)
 		}
 		DPrintf("Raft instance%d agreed with snapshot lastIncludedIndex=%d lastIncludedTerm=%d", rf.me, lastIncludedIndex, lastIncludedTerm)
 	} else {
 		// Otherwise: 7. Discard the entire log
-		//rf.log = rf.log[:0]
 		rf.log = make([]LogEntry, 0, 10)
 		DPrintf("Raft instance%d discarded its state due to newer snapshot lastIncludedIndex=%d lastIncludedTerm=%d", rf.me, lastIncludedIndex, lastIncludedTerm)
 	}
@@ -552,83 +521,16 @@ func (rf *Raft) handleInstallSnapshot(leaderTerm int, lastIncludedIndex int, las
 	rf.mu.Unlock()
 
 	if applySnapshot {
-
-		// TODO data race between applying snapshot and applying command in different threads?
-		// applying cmd and snapshot wihtout lock could cause reordering
-		// probably apply command and snapshot in a single loop
+		// TODO
+		// ! Race between applying snapshot and applying command in different threads.
+		// Applying cmd and snapshot wihtout lock could cause reordering
+		// Probably apply command and snapshot in a single loop
 		// fan-in?
 		rf.applyCh <- applyMsg
 	}
 	//rf.mu.Unlock() // causes deadlocks (ensured)
 
 	return currentTerm
-}
-
-func (rf *Raft) installSnapshotReceivedFromLeader(leaderTerm int, lastIncludedIndex int, lastIncludedTerm int, data []byte) bool {
-	// If the incoming RPC has older term, ignore it.
-	if leaderTerm < rf.currentTerm {
-		return false
-	}
-	rf.resetHeartbeatTimeout()
-	if rf.increaseTerm(leaderTerm) {
-		DPrintf("Raft instance%d detected higher term %d on InstallSnapshot RPC. Converting to follower", rf.me, leaderTerm)
-	}
-	if lastIncludedIndex <= rf.lastIncludedIndexInSnapshot {
-		DPrintf("Raft instance%d ignored snapshot due to request.lastIncludedIndex=%d and rf.lastIncludedIndexInSnapshot=%d", rf.me, lastIncludedIndex, rf.lastIncludedIndexInSnapshot)
-		return false
-	}
-	// 6. If existing log entry has same index and term as snapshot’s last included entry, retain log entries following it and reply
-	lastIncludedIndexLocal := rf.absToLocal(lastIncludedIndex)
-	if (lastIncludedIndexLocal >= 0) && (lastIncludedIndexLocal < len(rf.log)) && (rf.log[lastIncludedIndexLocal].Term == lastIncludedTerm) {
-		if lastIncludedIndexLocal == len(rf.log)-1 {
-			//rf.log = rf.log[:0]
-			rf.log = make([]LogEntry, 0, 10)
-		} else {
-			//rf.log = rf.log[lastIncludedIndexLocal+1:]
-			// newLog := make([]LogEntry, len(rf.log)-lastIncludedIndexLocal-1)
-			// copy(newLog, rf.log[lastIncludedIndexLocal+1:])
-			// rf.log = newLog
-			rf.log = append([]LogEntry(nil), rf.log[lastIncludedIndexLocal+1:]...)
-		}
-		DPrintf("Raft instance%d agreed with snapshot lastIncludedIndex=%d lastIncludedTerm=%d", rf.me, lastIncludedIndex, lastIncludedTerm)
-	} else {
-		// Otherwise: 7. Discard the entire log
-		//rf.log = rf.log[:0]
-		rf.log = make([]LogEntry, 0, 10)
-		DPrintf("Raft instance%d discarded its state due to newer snapshot lastIncludedIndex=%d lastIncludedTerm=%d", rf.me, lastIncludedIndex, lastIncludedTerm)
-	}
-
-	// install snapshot
-	rf.lastIncludedIndexInSnapshot = lastIncludedIndex
-	rf.lastIncludedTermInSnapshot = lastIncludedTerm
-	rf.snapshot = data
-	rf.persist()
-	return true
-}
-
-func (rf *Raft) applySnapshot() {
-	applyMsg := raftapi.ApplyMsg{}
-	rf.mu.Lock()
-	applySnapshot := rf.lastApplied < rf.lastIncludedIndexInSnapshot
-	if applySnapshot {
-		DPrintfImp("Raft instance%d applying snapshot. rf.lastApplied=%d (before), rf.lastApplied=%d (after), rf.lastIncludedIndexInSnapshot=%d lastIncludedTermInSnapshot=%d",
-			rf.me, rf.lastApplied, rf.lastIncludedIndexInSnapshot, rf.lastIncludedIndexInSnapshot, rf.lastIncludedTermInSnapshot)
-		rf.lastApplied = rf.lastIncludedIndexInSnapshot
-		if rf.commitIndex < rf.lastApplied {
-			rf.commitIndex = rf.lastApplied
-		}
-		applyMsg = raftapi.ApplyMsg{
-			SnapshotValid: true,
-			Snapshot:      rf.snapshot,
-			SnapshotTerm:  rf.lastIncludedTermInSnapshot,
-			SnapshotIndex: rf.lastIncludedIndexInSnapshot + 1, // pretend 1-indexed
-		}
-	}
-	rf.mu.Unlock()
-
-	if applySnapshot {
-		rf.applyCh <- applyMsg
-	}
 }
 
 func (rf *Raft) isSnapshotExists() bool {
@@ -822,15 +724,7 @@ func (rf *Raft) deleteConflictingEntriesOnFollower(prevLogIndex int, newEntries 
 			break
 		}
 		if newEntries[newEntriesIndex].Term != rf.log[logIndex].Term {
-			//rf.log = rf.log[:logIndex] // found mismatch, delete all log entries staring here
-
-			// log (local) = 0 1 2 3
-			// logIndex    =     2   <-- need to delete 2 3
-			// newLog := make([]LogEntry, len(rf.log)-logIndex)
-			// copy(newLog, rf.log[:logIndex])
-			// rf.log = newLog
-
-			rf.log = append([]LogEntry(nil), rf.log[:logIndex]...)
+			rf.log = append([]LogEntry(nil), rf.log[:logIndex]...) // found mismatch, delete all log entries staring here
 			break
 		}
 		logIndex++
@@ -850,7 +744,7 @@ func (rf *Raft) appentNewEntries(newEntriesIndex int, newEntries []LogEntryApiMo
 		newEntriesIndex++
 		appendedCount++
 	}
-	if appendedCount > 0 {
+	if appendedCount > 0 { // debug
 		//rf.printLog()
 	}
 }
@@ -937,7 +831,7 @@ func (rf *Raft) startElection() {
 				//DPrintf("Raft instance%d received majority votes (%d), becoming leader", rf.me, votes)
 				rf.mu.Lock()
 				becameLeader := rf.transitionToLeader(currentTerm)
-				if becameLeader {
+				if becameLeader { // debug
 					DPrintf("Raft instance%d is now LEADER for term %d, votes=%d", rf.me, rf.currentTerm, votes)
 				} else {
 					//DPrintf("Raft instance%d transition to leader fail: already fallen back to follower", rf.me)
@@ -953,7 +847,7 @@ func (rf *Raft) startElection() {
 						//DPrintf("Raft instance%d detected higher term %d while election. Converting to follower", rf.me, higherTerm)
 					}
 					rf.mu.Unlock()
-				} else {
+				} else { // debug
 					//DPrintf("Raft instance%d received only %d votes, staying as candidate", rf.me, votes)
 				}
 			}
@@ -1351,7 +1245,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 		rf.lastIncludedIndexInSnapshot = index
 		rf.snapshot = snapshot
 
-		//rf.log = rf.log[localIndex+1:]
 		// case: first snapshot
 		// log (abs)    = 0 1 2 3 4 5
 		// new snapshot = 0 1 2
@@ -1365,11 +1258,9 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 		// new snapshot =     2 3
 		// index        =       3
 		// localIndex   =       1
+		//
 		// Shrink log by creating a completety new slice in memory and copying data to it.
 		// If doing just rf.log = rf.log[localIndex+1:] the underlying array will not be shrinked
-		//newLog := make([]LogEntry, len(rf.log)-localIndex-1)
-		//copy(newLog, rf.log[localIndex+1:])
-		//rf.log = newLog
 		rf.log = append([]LogEntry(nil), rf.log[localIndex+1:]...)
 
 		rf.persist()
@@ -1503,7 +1394,7 @@ func (rf *Raft) persist() {
 	encoder.Encode(raftState)
 	rf.persister.Save(stateBuffer.Bytes(), rf.snapshot)
 
-	//compareRaftStates(raftState, rf.persister)
+	//compareRaftStates(raftState, rf.persister) // debug
 }
 
 func compareRaftStates(before RaftState, persister *tester.Persister) {

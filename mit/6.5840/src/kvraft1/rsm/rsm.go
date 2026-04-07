@@ -21,7 +21,7 @@ const Debug = false
 const DebugImp = false
 
 const (
-	raftStateShrinkRate = 0.4
+	raftStateShrinkRate = 0.8
 )
 
 type OpID struct {
@@ -74,11 +74,12 @@ type RSM struct {
 	maxraftstate int // snapshot if log grows this big
 	sm           StateMachine
 	// Your definitions here.
-	persister        *tester.Persister
-	lastId           int
-	lastAppliedIndex int // 1-indexed
-	pendingSubmits   *list.List
-	appliedCommands  *list.List // for debug logging
+	persister            *tester.Persister
+	maxraftstatelimitted int // fraction of maxraftstate
+	lastId               int
+	lastAppliedIndex     int // 1-indexed
+	pendingSubmits       *list.List
+	appliedCommands      *list.List // for debug logging
 }
 
 // servers[] contains the ports of the set of
@@ -99,14 +100,16 @@ type RSM struct {
 func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, maxraftstate int, sm StateMachine) *RSM {
 	raft.DPrintf("RSM node%d: starting", me)
 	rsm := &RSM{
-		me:              me,
-		maxraftstate:    maxraftstate,
-		applyCh:         make(chan raftapi.ApplyMsg),
-		sm:              sm,
-		persister:       persister,
-		pendingSubmits:  list.New(),
-		appliedCommands: list.New(),
+		me:                   me,
+		maxraftstate:         maxraftstate,
+		applyCh:              make(chan raftapi.ApplyMsg),
+		sm:                   sm,
+		persister:            persister,
+		maxraftstatelimitted: int(float64(maxraftstate) * raftStateShrinkRate),
+		pendingSubmits:       list.New(),
+		appliedCommands:      list.New(),
 	}
+
 	if !tester.UseRaftStateMachine {
 		rsm.restoreSnapshot(rsm.persister.ReadSnapshot())
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
@@ -135,11 +138,8 @@ func (rsm *RSM) raftStateSizeTooLarge() bool {
 	if rsm.maxraftstate == -1 {
 		return false
 	}
-	// raftStateBytes := rsm.rf.PersistBytes()
-	// limitBytes := int(float64(rsm.maxraftstate) * raftStateShrinkRate)
-	// return raftStateBytes > limitBytes
-
-	return rsm.rf.PersistBytes() >= rsm.maxraftstate
+	return rsm.rf.PersistBytes() > rsm.maxraftstatelimitted
+	//return rsm.rf.PersistBytes() >= rsm.maxraftstate
 }
 
 func (rsm *RSM) restoreSnapshot(data []byte) {
