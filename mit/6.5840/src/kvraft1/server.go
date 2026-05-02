@@ -160,9 +160,10 @@ func StartKVServer(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, persist
 	labgob.Register(rpc.PutArgs{})
 	labgob.Register(rpc.GetArgs{})
 	labgob.Register(Value{})
-	kv := &KVServer{me: me}
 
+	kv := &KVServer{me: me}
 	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)
+
 	// You may need initialization code here.
 	if kv.data == nil {
 		kv.data = make(map[string]Value)

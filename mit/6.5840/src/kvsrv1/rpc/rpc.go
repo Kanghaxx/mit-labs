@@ -24,8 +24,16 @@ type PutArgs struct {
 	Version Tversion
 }
 
+type GenericReply interface {
+	GetErr() Err
+}
+
 type PutReply struct {
 	Err Err
+}
+
+func (reply *PutReply) GetErr() Err {
+	return reply.Err
 }
 
 type GetArgs struct {
@@ -36,4 +44,8 @@ type GetReply struct {
 	Value   string
 	Version Tversion
 	Err     Err
+}
+
+func (reply *GetReply) GetErr() Err {
+	return reply.Err
 }
