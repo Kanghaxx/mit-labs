@@ -87,30 +87,19 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 			DPrintf("Client%d: Get timeout, requestId=%d attempt=%d", ck.id, requestId, attempt)
 		}
 
-		attempt++
-
 		// limiting attempts to some N is buggy: there could be more than N servers in the group and attempts could run out too early
-		//
-		// attempts >= len: causes error history is not linearizable 10\10
-		// if attempt >= len(ck.servers) && !result {
-		// 	return "", 0, rpc.ErrWrongGroup
-		// }
-
-		// 30 attempts: causes error history is not linearizable 2\10
-		// 100 attempts: 2\10
-		// 1000 attempts: 9\10
-		if attempt > 50 && !result {
+		attempt++
+		if (attempt > len(ck.servers)*3) && (!result) {
 			return "", 0, rpc.ErrWrongGroup
 		}
 
 		server = (server + 1) % len(ck.servers)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
 // TODO move to a generic method that executes a func and updates leader or does retries
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
-	// Your code here
 	attempt := 0
 	ck.mu.Lock()
 	server := ck.leader
@@ -128,32 +117,28 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 			ck.mu.Lock()
 			ck.leader = server
 			ck.mu.Unlock()
-			if attempt > 0 && reply.Err == rpc.ErrVersion {
-				DPrintf("Client%d: Put completed, requestId=%d attempt=%d. reply.Err=%v, returning ErrMaybe", ck.id, requestId, attempt, reply.Err)
-				return rpc.ErrMaybe
+
+			if attempt > 0 {
+				switch reply.Err {
+				case rpc.ErrVersion:
+					DPrintf("Client%d: Put completed, requestId=%d attempt=%d. reply.Err=%v, returning ErrMaybe", ck.id, requestId, attempt, reply.Err)
+					return rpc.ErrMaybe
+				case rpc.ErrWrongGroup:
+					DPrintf("Client%d: Put completed, requestId=%d attempt=%d. reply.Err=%v, returning ErrWrongGroupRetried", ck.id, requestId, attempt, reply.Err)
+					return rpc.ErrWrongGroupRetried // any subsequent ErrVersion will be treated as ErrMaybe by the calling clerk
+				}
 			}
 			DPrintf("Client%d: Put completed, requestId=%d attempt=%d. reply.Err=%v", ck.id, requestId, attempt, reply.Err)
 			return reply.Err
 		}
 
-		if result { // debug logging
-			DPrintf("Client%d: Put ErrWrongLeader, requestId=%d attempt=%d", ck.id, requestId, attempt)
-		} else {
-			DPrintf("Client%d: Put timeout, requestId=%d attempt=%d", ck.id, requestId, attempt)
-		}
-
 		attempt++
-
-		// if attempt >= len(ck.servers) && !result {
-		// 	return rpc.ErrWrongGroup
-		// }
-
-		if attempt > 50 && !result {
-			return rpc.ErrWrongGroup
+		if (attempt > len(ck.servers)*3) && !result {
+			return rpc.ErrWrongGroupRetried
 		}
 
 		server = (server + 1) % len(ck.servers)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

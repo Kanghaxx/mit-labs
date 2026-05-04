@@ -86,6 +86,7 @@ func (kv *KVServer) applyPut(args rpc.PutArgs) rpc.PutReply {
 		if args.Version != 0 {
 			return rpc.PutReply{Err: rpc.ErrNoKey}
 		}
+		DPrintfS("KV node%d: applyPut installing new key %s versionReq=%d -> set version=1 value=%s", kv.me, args.Key, args.Version, args.Value)
 		kv.shards[sid][args.Key] = Value{
 			Value:   args.Value,
 			Version: 1,
@@ -94,8 +95,10 @@ func (kv *KVServer) applyPut(args rpc.PutArgs) rpc.PutReply {
 	}
 
 	if value.Version != uint64(args.Version) {
+		DPrintfS("KV node%d: applyPut ErrVersion for key %s. stored.version=%d req.version=%d", kv.me, args.Key, value.Version, args.Version)
 		return rpc.PutReply{Err: rpc.ErrVersion}
 	}
+	DPrintfS("KV node%d: applyPut updating key %s from version=%d to version=%d with value=%s", kv.me, args.Key, value.Version, value.Version+1, args.Value)
 	kv.shards[sid][args.Key] = Value{
 		Value:   args.Value,
 		Version: value.Version + 1,

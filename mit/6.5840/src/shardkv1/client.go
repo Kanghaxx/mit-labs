@@ -88,15 +88,22 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 	// You will have to modify this function.
 	//log.Printf("Put")
 	shardNumber := shardcfg.Key2Shard(key)
+	retried := false
 	for {
 		//log.Printf("Put: groupId=%v servers=%v", groupId, servers)
+
 		ck.config = ck.controller.Query()
 		groupId, servers, _ := ck.config.GidServers(shardNumber)
 		shardClerk := shardgrp.MakeClerk(ck.clnt, servers)
 
 		error := shardClerk.Put(key, value, version)
-		if error == rpc.ErrWrongGroup {
+		switch error {
+		case rpc.ErrWrongGroup:
 			//log.Printf("Put: received ErrWrongGroup")ck.config = nil
+			time.Sleep(20 * time.Millisecond)
+			continue
+		case rpc.ErrWrongGroupRetried:
+			retried = true
 			time.Sleep(20 * time.Millisecond)
 			continue
 		}
@@ -104,6 +111,9 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 		ck.mu.Lock()
 		ck.shardGroupClerks[groupId] = shardClerk
 		ck.mu.Unlock()
+		if error == rpc.ErrVersion && retried {
+			return rpc.ErrMaybe
+		}
 		return error
 	}
 }
