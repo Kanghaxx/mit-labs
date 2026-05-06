@@ -159,6 +159,7 @@ func (ck *Clerk) FreezeShard(s shardcfg.Tshid, num shardcfg.Tnum) ([]byte, rpc.E
 			ck.leader = server
 			ck.mu.Unlock()
 			if reply.Num > num { // trying to signal the controller to exit
+				DPrintf("Client%d: FreezeShard fenced out due to Num mismatch", ck.id)
 				return nil, rpc.ErrWrongGroup // ErrMaybe or ErrWrongGroup or custom error?
 			}
 			return reply.State, reply.Err

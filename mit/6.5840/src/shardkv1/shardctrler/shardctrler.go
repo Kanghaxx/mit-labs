@@ -47,6 +47,25 @@ func MakeShardCtrler(clnt *tester.Clnt) *ShardCtrler {
 // controller. In part A, this method doesn't need to do anything. In
 // B and C, this method implements recovery.
 func (sck *ShardCtrler) InitController() {
+	valCur, _, errCur := sck.IKVClerk.Get("currentConfig")
+	if errCur != rpc.OK {
+		panic("InitController: Get currentConfig error")
+	}
+	currentConfig := shardcfg.FromString(valCur)
+	valNew, _, errNew := sck.IKVClerk.Get("newConfig")
+	if errNew == rpc.ErrNoKey {
+		return // no new config stored
+	}
+	newConfig := shardcfg.FromString(valNew)
+	if currentConfig.Num == newConfig.Num {
+		return // new config already applied
+	} else if currentConfig.Num > newConfig.Num {
+		panic("InitController: currentConfig.Num > newConfig.Num")
+	}
+
+	DPrintf("Controller.InitController: new config detected. Restoring. currentConfig=%+v newConfig=%+v", currentConfig, newConfig)
+	sck.ChangeConfigTo(newConfig)
+
 }
 
 // Called once by the tester to supply the first configuration.  You
@@ -71,22 +90,41 @@ type ShardMovement struct {
 	NewGroup     tester.Tgid
 }
 
+func (sck *ShardCtrler) storeNewConfig(new *shardcfg.ShardConfig) bool {
+	// TODO what if nextConfig exists and is not completed?
+	// check value's Num?
+	_, version, err := sck.IKVClerk.Get("newConfig")
+	if err == rpc.ErrNoKey {
+		version = 0
+	}
+	err = sck.IKVClerk.Put("newConfig", new.String(), version)
+	// TODO check err for ErrVersion? and if detected, another controller is present = quit?
+	// and if ErrMaybe, call Get to ensure?
+	DPrintf("Controller.ChangeConfigTo: error storing new config to kvsrv: %v", err)
+	return true
+}
+
 // Called by the tester to ask the controller to change the
 // configuration from the current one to new.  While the controller
 // changes the configuration it may be superseded by another
 // controller.
 func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
-	// WTF While the controller
-	// changes the configuration it may be superseded by another
+	// TODO 5C
+	// While the controller changes the configuration it may be superseded by another
 	// controller.
-	// ! probably clerk should be callend with Num determined in shard config param. FreezeShard returns Num in reply.
+	// ! Probably clerk should be callend with Num determined in shard config param. FreezeShard returns Num in reply.
 	// Probably check if it differs from the current. If so, there is a new controller, exit.
+	if !sck.storeNewConfig(new) {
+		DPrintf("Controller.ChangeConfigTo: error storing new config to kvsrv. Exiting. newConfig=%+v", new)
+		return
+	}
+	DPrintf("Controller.ChangeConfigTo: new config stored in kvsrv. newConfig=%+v", new)
 	val, version, err := sck.IKVClerk.Get("currentConfig")
 	if err != rpc.OK {
 		panic("ChangeConfigTo: Get currentConfig error")
 	}
 	currentConfig := shardcfg.FromString(val)
-	DPrintf("Controller.ChangeConfigTo: currentConfig=%+v newConfig=%+v", currentConfig, new)
+	DPrintf("Controller.ChangeConfigTo: working. currentConfig=%+v newConfig=%+v", currentConfig, new)
 	shards := make([]*ShardMovement, shardcfg.NShards)
 	for i, _ := range shards {
 		shards[i] = &ShardMovement{
@@ -109,7 +147,7 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 			// TODO cache clerks
 			currentClerk := shardgrp.MakeClerk(sck.clnt, currentConfig.Groups[shard.CurrentGroup])
 			state, err := currentClerk.FreezeShard(shard.Shard, new.Num)
-			if err == rpc.ErrWrongGroup {
+			if err == rpc.ErrWrongGroup { // ErrWrongGroup is returned on Num mismatch. Try another error type?
 				DPrintf("Controller.ChangeConfigTo: Shard[%d] FreezeShard err=ErrWrongGroup. Exiting", shard.Shard)
 				return // another controller detected: new.Num was smaller than Num that the shard group has seen
 			}
@@ -118,16 +156,21 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 				panic(fmt.Sprintf("ChangeConfigTo: freeze error: %v", err))
 			}
 
-			if state == nil { // shard doesn't exist on server or Num mismatch
-				DPrintf("Controller.ChangeConfigTo: nil state received for Shard[%d]. Exiting", shard.Shard)
-				return
+			if state == nil { // nil state is returned when shard is already deleted, which could happen if the previous controller tried to apply a new config and crashed or partitioned out
+				continue
 			}
+			// if state == nil { // shard doesn't exist on server or Num mismatch
+			// 	DPrintf("Controller.ChangeConfigTo: nil state received for Shard[%d]. Exiting", shard.Shard)
+			// 	return
+			// }
+
 			newClerk := shardgrp.MakeClerk(sck.clnt, new.Groups[shard.NewGroup])
 			err = newClerk.InstallShard(shard.Shard, state, new.Num)
 			if err != rpc.OK {
 				panic(fmt.Sprintf("ChangeConfigTo: install error: %v", err))
 			}
 			DPrintf("Controller.ChangeConfigTo: Shard[%d] installed on group [%d]", shard.Shard, shard.NewGroup)
+
 			err = currentClerk.DeleteShard(shard.Shard, new.Num)
 			if err != rpc.OK {
 				panic(fmt.Sprintf("ChangeConfigTo: delete error: %v", err))
